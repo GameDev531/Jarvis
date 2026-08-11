@@ -1,0 +1,168 @@
+# James — configuração central.
+# Regra do projeto: o que é permitido/arriscado é decidido AQUI (determinístico),
+# nunca pelo julgamento do LLM. Ver james/permissions/guard.py.
+
+persona:
+  nome: James
+  tratamento: senhor          # como o James se dirige a você
+  idioma: pt-BR
+
+wake_word:
+  # "jarvis" é keyword pré-treinada do Porcupine (grátis, sem treino).
+  # Para "james" de verdade: gere um .ppn no console da Picovoice e aponte
+  # keyword_path para ele, ou treine um modelo openWakeWord (Fase 7).
+  keyword: jarvis
+  keyword_path: null
+  sensitivity: 0.6
+  access_key_env: PORCUPINE_ACCESS_KEY
+
+audio:
+  sample_rate: 16000          # exigido por webrtcvad + Porcupine + whisper.cpp
+  channels: 1
+  sample_width: 2             # PCM 16-bit
+  frame_ms: 30                # webrtcvad aceita apenas 10, 20 ou 30
+  input_device: null          # null = dispositivo padrão do Windows
+  output_device: null
+  vad:
+    aggressiveness: 2         # 0 (permissivo) a 3 (agressivo)
+    start_frames: 3           # frames de fala consecutivos para começar a gravar
+    end_silence_ms: 700       # silêncio contínuo que encerra o comando
+    preroll_ms: 300           # áudio mantido ANTES do início da fala (evita cortar sílaba)
+    min_command_ms: 400       # abaixo disso é ruído, descarta
+    max_command_ms: 15000     # teto duro de gravação
+    max_wait_speech_ms: 6000  # se ninguém falar após o wake word, desiste
+
+behavior:
+  half_duplex: true           # pausa a escuta enquanto o TTS fala (evita eco — C3)
+  barge_in: false             # true = wake word durante o TTS interrompe a fala
+  tts_tail_ms: 300            # margem após o fim do áudio antes de reabrir o mic
+  max_tool_iterations: 5      # teto duro de ciclos de tool por tarefa
+  history_turns: 12           # turnos mantidos no histórico enviado ao LLM
+
+llm:
+  gemini:
+    model: gemini-2.5-flash
+    thinking_budget: 0        # desliga o "thinking" — latência menor no caminho de voz
+    timeout_s: 30
+    max_output_tokens: 800
+    temperature: 0.7
+  openrouter:
+    # Fallback para 429 do Gemini. A cota diária do OpenRouter é POR CONTA e
+    # compartilhada entre TODOS os modelos :free — a lista abaixo protege contra
+    # 429 por minuto, não multiplica a cota diária.
+    enabled: true
+    timeout_s: 30
+    cooldown_s: 60            # tempo que um modelo fica em resfriamento após 429
+    models:
+      - meta-llama/llama-3.3-70b-instruct:free
+      - qwen/qwen-2.5-72b-instruct:free
+      - google/gemma-2-9b-it:free
+      - mistralai/mistral-7b-instruct:free
+  rate_limit:
+    requests_per_minute: 10
+    requests_per_day: 240     # conservador; ajuste conforme sua cota real
+  local_router:
+    enabled: true             # casa comandos frequentes sem gastar requisição
+
+tts:
+  engine: piper
+  # Baixe uma voz pt_BR em https://huggingface.co/rhasspy/piper-voices
+  voice_path: voices/pt_BR-faber-medium.onnx
+  binary: null                # ex: C:\piper\piper.exe — usado se o pacote Python falhar
+  length_scale: 1.0           # >1 fala mais devagar
+  sentence_streaming: true    # sintetiza e toca por sentença (reduz tempo até a 1ª palavra)
+
+stt:
+  # whisper.cpp — fallback offline e transcrição da confirmação de risco (sempre local)
+  binary: null                # ex: C:\whisper\whisper-cli.exe
+  model: models/ggml-tiny-q5_1.bin
+  language: pt
+  timeout_s: 60
+  threads: 4
+
+overlay:
+  enabled: true
+  position: bottom-right      # bottom-right | bottom-center | top-right | center
+  size: 260                   # px
+  margin: 40
+  fps: 30
+  profile: light              # light = QPainter puro (Fase 1). "full" reservado p/ Fase 3.
+
+killswitch:
+  enabled: true
+  hotkey: ctrl+alt+j          # cancela tudo e volta para IDLE
+
+ipc:
+  host: 127.0.0.1
+  port: 47821
+  heartbeat_s: 5
+  heartbeat_timeout_s: 30
+  restart_backoff_s: [2, 4, 8, 16, 30]
+
+permissions:
+  # --------- Nível 1: executa direto ---------
+  # Apps permitidos. Chave = como você fala; valor = comando/executável.
+  apps:
+    chrome: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+    bloco de notas: "notepad.exe"
+    notepad: "notepad.exe"
+    calculadora: "calc.exe"
+    explorador: "explorer.exe"
+    spotify: "spotify.exe"
+    vscode: "code"
+    code: "code"
+
+  # Pastas que tools de arquivo podem tocar (Fase 6). Fora daqui = bloqueado.
+  folders:
+    - "C:\\Users\\Public\\Downloads"
+
+  # --------- Nível 2: exige confirmação verbal ---------
+  # Casado contra a URL inteira, minúscula, sem acento.
+  risky_url_patterns:
+    - checkout
+    - payment
+    - pagamento
+    - carrinho
+    - "/cart"
+    - cartao
+    - boleto
+    - pix
+    - transferencia
+    - bank
+    - banco
+
+  require_https: true         # http:// vira Nível 2 com aviso explícito
+
+  # --------- Bloqueio duro: nunca executa ---------
+  blocked_domains:
+    - localhost
+    - 127.0.0.1
+    - 0.0.0.0
+    - "169.254.169.254"       # metadata de nuvem
+  blocked_url_schemes:
+    - file
+    - javascript
+    - data
+    - vbscript
+    - about
+    - chrome
+    - ftp
+
+  confirm:
+    timeout_s: 10             # sem resposta = negado
+    max_attempts: 2           # resposta ambígua = mais uma chance, depois nega
+    # Casamento determinístico — nunca passa pelo LLM (C2)
+    yes_words: [sim, confirmo, confirmado, pode, pode sim, positivo, isso, claro, autorizo, prossiga, manda, ok, okay]
+    no_words: [nao, não, negativo, cancela, cancelar, para, pare, esquece, aborta, abortar, deixa, melhor nao, melhor não]
+
+security:
+  # Higiene de conteúdo externo antes de entrar no histórico do LLM (A3)
+  max_external_chars: 4000
+  external_tag: resultado_externo
+
+logs:
+  dir: logs
+  level: INFO
+  audit_file: logs/audit.jsonl
+  max_bytes: 5242880
+  backup_count: 3

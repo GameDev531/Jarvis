@@ -1,0 +1,39 @@
+# Segredos — NUNCA commitar
+.env
+*.key
+credentials.json
+
+# Estado local gerado em runtime
+hardware_report.json
+logs/*.log
+logs/*.jsonl
+state/
+runtime_state.json
+usage_counters.json
+james.lock
+
+# Modelos e vozes (grandes, baixados localmente)
+voices/
+models/
+*.onnx
+*.onnx.json
+*.ppn
+*.bin
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# SO / editor
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/
