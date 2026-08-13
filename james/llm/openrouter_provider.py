@@ -1,22 +1,25 @@
-"""OpenRouter — fallback quando o Gemini recusa por cota.
+"""OpenRouter — o cérebro que decide e escreve (papel de RACIOCÍNIO).
 
-Expectativa calibrada (correção C1, confirmada na documentação): o limite dos
-modelos `:free` é POR CONTA e compartilhado entre todos eles — 50 requisições
-por dia sem crédito, 1.000 por dia com US$ 10 vitalícios, e 20 por minuto em
-qualquer caso. Ou seja: a lista de modelos protege contra o 429 momentâneo de
-um provedor específico, mas NÃO multiplica a cota diária. Isso é uma rede de
-segurança, não uma fonte inesgotável.
+É aqui que o James pensa: entender a tarefa, planejar, redigir e escolher quais
+ferramentas chamar. O catálogo do OpenRouter dá acesso a modelos de texto bem
+maiores que o Flash, e a cota é independente da do Gemini — que fica com o que
+só ele faz (ouvir e ver).
 
-Limitação real: estes modelos recebem texto, não áudio. Quando o fallback
-entra, o comando precisa ter sido transcrito localmente pelo whisper.cpp — é
-por isso que o STT local continua no projeto mesmo fora do caminho comum.
+Expectativa calibrada sobre a cota: o limite dos modelos `:free` é POR CONTA e
+compartilhado entre todos eles — 50 requisições por dia sem crédito, 1.000 por
+dia com US$ 10 vitalícios, e 20 por minuto em qualquer caso. A lista de modelos
+protege contra o 429 momentâneo de um modelo específico; ela NÃO multiplica a
+cota diária.
+
+Limitação real: estes modelos recebem texto, não áudio nem imagem. Quem cuida
+disso é o Gemini, nos papéis de percepção e visão.
 """
 
 from __future__ import annotations
 
 import json
 import time
-from typing import Any
+from typing import Any, Iterator
 
 from james.llm.base import (
     LLMResponse,
@@ -32,20 +35,23 @@ from james.logs import get_logger
 logger = get_logger("james.llm.openrouter")
 
 _ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
+_DONE = "[DONE]"
 
 
 class OpenRouterProvider:
     name = "openrouter"
+    accepts_audio = False
+    accepts_image = False
 
     def __init__(
         self,
         api_key: str,
         models: list[str],
         system_prompt: str = "",
-        timeout_s: int = 30,
+        timeout_s: int = 60,
         cooldown_s: int = 60,
         temperature: float = 0.7,
-        max_output_tokens: int = 800,
+        max_output_tokens: int = 1200,
     ) -> None:
         if not api_key:
             raise ProviderError("OPENROUTER_API_KEY ausente.")
@@ -91,97 +97,112 @@ class OpenRouterProvider:
         tools: list[ToolSchema] | None = None,
         on_text: TextCallback | None = None,
     ) -> LLMResponse:
-        if not text:
+        if audio_wav is not None and not text:
             raise ProviderError(
-                "OpenRouter recebe apenas texto. Sem transcrição local disponível, "
-                "este fallback não pode ser usado."
+                "OpenRouter recebe apenas texto. O áudio precisa passar antes pela "
+                "etapa de percepção."
             )
+        if not text:
+            raise ProviderError("Nada a enviar: sem texto.")
 
-        messages = self._build_messages(conversation, text, instruction)
-        payload_base: dict[str, Any] = {
-            "messages": messages,
+        payload: dict[str, Any] = {
+            "messages": self._build_messages(conversation, text, instruction),
             "temperature": self.temperature,
             "max_tokens": self.max_output_tokens,
+            "stream": True,
         }
         if tools:
-            payload_base["tools"] = [tool.to_openai() for tool in tools]
+            payload["tools"] = [tool.to_openai() for tool in tools]
 
         last_error: Exception | None = None
         for model in self._available_models():
-            payload = dict(payload_base, model=model)
             try:
-                response = self._post(payload)
+                return self._stream_one(dict(payload, model=model), model, on_text)
             except QuotaExceeded as exc:
                 self._mark_cooldown(model)
                 last_error = exc
-                continue
             except ProviderError as exc:
+                logger.warning("Modelo %s falhou: %s", model, exc)
                 last_error = exc
-                continue
-
-            parsed = self._parse(response, model)
-            if on_text is not None and parsed.text:
-                # A resposta chega inteira; entregamos de uma vez para manter o
-                # mesmo contrato do caminho em streaming.
-                on_text(parsed.text)
-            return parsed
 
         raise QuotaExceeded(
             f"Nenhum modelo do OpenRouter respondeu. Último erro: {last_error}"
         )
 
-    def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def _stream_one(
+        self, payload: dict[str, Any], model: str, on_text: TextCallback | None
+    ) -> LLMResponse:
+        """Uma tentativa em streaming.
+
+        O streaming importa aqui porque este provedor virou o respondedor
+        principal: sem ele, o James só começaria a falar depois da resposta
+        inteira pronta, e o que o usuário percebe como demora é o tempo até a
+        PRIMEIRA palavra.
+        """
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            # Identificação recomendada pelo OpenRouter para apps próprios.
             "X-Title": "James Assistant",
         }
+
+        collected: list[str] = []
+        # Acumulador de tool calls por índice: no streaming, nome e argumentos
+        # chegam picotados em vários fragmentos.
+        partial_calls: dict[int, dict[str, Any]] = {}
+        started = time.monotonic()
+        first_token_at: float | None = None
+
         try:
             with self._httpx.Client(timeout=self.timeout_s) as client:
-                response = client.post(_ENDPOINT, headers=headers, json=payload)
+                with client.stream(
+                    "POST", _ENDPOINT, headers=headers, json=payload
+                ) as response:
+                    if response.status_code == 429:
+                        raise QuotaExceeded(f"429 do OpenRouter para {model}")
+                    if response.status_code >= 400:
+                        response.read()
+                        detail = response.text[:300]
+                        error = ProviderError(
+                            f"OpenRouter devolveu {response.status_code}: {detail}"
+                        )
+                        if looks_like_quota_error(error):
+                            raise QuotaExceeded(str(error)) from error
+                        raise error
+
+                    for event in _iter_sse(response.iter_lines()):
+                        piece, calls_delta = _read_event(event)
+                        if piece:
+                            if first_token_at is None:
+                                first_token_at = time.monotonic()
+                            collected.append(piece)
+                            if on_text is not None:
+                                on_text(piece)
+                        _merge_tool_calls(partial_calls, calls_delta)
+        except (QuotaExceeded, ProviderError):
+            raise
         except Exception as exc:  # noqa: BLE001 — httpx tem vários tipos de erro
             raise ProviderError(f"Erro de rede no OpenRouter: {exc}") from exc
 
-        if response.status_code == 429:
-            raise QuotaExceeded(f"429 do OpenRouter para {payload.get('model')}")
-        if response.status_code >= 400:
-            detail = response.text[:300]
-            error = ProviderError(
-                f"OpenRouter devolveu {response.status_code}: {detail}"
-            )
-            if looks_like_quota_error(error):
-                raise QuotaExceeded(str(error)) from error
-            raise error
+        elapsed = time.monotonic() - started
+        ttfb = (first_token_at - started) if first_token_at else elapsed
+        tool_calls = _finalize_tool_calls(partial_calls)
+        logger.info(
+            "OpenRouter (%s) respondeu em %.2fs (primeira palavra em %.2fs, %d tool call(s))",
+            model,
+            elapsed,
+            ttfb,
+            len(tool_calls),
+        )
 
-        try:
-            return response.json()
-        except (json.JSONDecodeError, ValueError) as exc:
-            raise ProviderError(f"Resposta ilegível do OpenRouter: {exc}") from exc
-
-    def _parse(self, data: dict[str, Any], model: str) -> LLMResponse:
-        choices = data.get("choices") or []
-        if not choices:
-            raise ProviderError("OpenRouter devolveu resposta sem 'choices'.")
-        message = choices[0].get("message") or {}
-
-        tool_calls: list[ToolCall] = []
-        for raw in message.get("tool_calls") or []:
-            function = raw.get("function") or {}
-            name = function.get("name")
-            if not name:
-                continue
-            arguments = function.get("arguments")
-            tool_calls.append(
-                ToolCall(name=name, args=_parse_arguments(arguments), call_id=raw.get("id"))
-            )
+        text = "".join(collected).strip()
+        if not text and not tool_calls:
+            raise ProviderError(f"{model} devolveu resposta vazia.")
 
         return LLMResponse(
-            text=(message.get("content") or "").strip(),
-            tool_calls=tool_calls,
-            provider=self.name,
-            model=model,
+            text=text, tool_calls=tool_calls, provider=self.name, model=model
         )
+
+    # -------------------------------------------------------------- montagem
 
     def _build_messages(
         self,
@@ -229,6 +250,73 @@ class OpenRouterProvider:
         return messages
 
 
+# ----------------------------------------------------------------- streaming
+
+def _iter_sse(lines: Iterator[str]) -> Iterator[dict[str, Any]]:
+    """Extrai os objetos JSON de um fluxo server-sent events.
+
+    O OpenRouter intercala comentários (linhas iniciadas por ':') para manter a
+    conexão viva; eles não são JSON e precisam ser ignorados.
+    """
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith(":"):
+            continue
+        if not line.startswith("data:"):
+            continue
+        payload = line[5:].strip()
+        if payload == _DONE:
+            return
+        try:
+            parsed = json.loads(payload)
+        except json.JSONDecodeError:
+            logger.debug("Fragmento SSE ilegível ignorado: %r", payload[:120])
+            continue
+        if isinstance(parsed, dict):
+            yield parsed
+
+
+def _read_event(event: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
+    choices = event.get("choices") or []
+    if not choices:
+        return "", []
+    delta = choices[0].get("delta") or {}
+    return (delta.get("content") or ""), (delta.get("tool_calls") or [])
+
+
+def _merge_tool_calls(
+    accumulator: dict[int, dict[str, Any]], deltas: list[dict[str, Any]]
+) -> None:
+    """Junta os pedaços de uma tool call que chegam em fragmentos separados.
+
+    O índice é a chave, não o nome: numa mesma resposta o modelo pode chamar a
+    mesma ferramenta duas vezes com argumentos diferentes.
+    """
+    for delta in deltas:
+        index = delta.get("index", 0)
+        slot = accumulator.setdefault(index, {"id": None, "name": "", "arguments": ""})
+        if delta.get("id"):
+            slot["id"] = delta["id"]
+        function = delta.get("function") or {}
+        if function.get("name"):
+            slot["name"] = function["name"]
+        if function.get("arguments"):
+            slot["arguments"] += function["arguments"]
+
+
+def _finalize_tool_calls(accumulator: dict[int, dict[str, Any]]) -> list[ToolCall]:
+    calls: list[ToolCall] = []
+    for index in sorted(accumulator):
+        slot = accumulator[index]
+        name = slot.get("name")
+        if not name:
+            continue
+        calls.append(
+            ToolCall(name=name, args=_parse_arguments(slot.get("arguments")), call_id=slot.get("id"))
+        )
+    return calls
+
+
 def _parse_arguments(raw: Any) -> dict[str, Any]:
     """Argumentos chegam como string JSON; modelo pequeno às vezes erra o JSON."""
     if isinstance(raw, dict):
@@ -238,6 +326,6 @@ def _parse_arguments(raw: Any) -> dict[str, Any]:
     try:
         parsed = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
-        logger.warning("Argumentos de tool ilegíveis do OpenRouter: %r", raw)
+        logger.warning("Argumentos de tool ilegíveis do OpenRouter: %r", str(raw)[:200])
         return {}
     return parsed if isinstance(parsed, dict) else {}

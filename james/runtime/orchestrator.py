@@ -1,19 +1,20 @@
 """Processo 2 — máquina de estados do James.
 
-Fluxo de um turno:
+Fluxo de um turno, com os papéis separados (ver james/llm/roles.py):
 
     wake (do processo 1, que já liberou o microfone)
       -> LISTENING   grava o comando com VAD
-      -> THINKING    manda o ÁUDIO direto ao Gemini (1 requisição)
-           |
-           +-- texto     -> SPEAKING, sintetizando por sentença em streaming
-           +-- tool call -> guard determinístico
-                              |-- Nível 1 -> executa
-                              |     e, se for fire-and-forget, fala a frase
-                              |     pronta sem voltar à API (1 requisição)
-                              +-- Nível 2 -> CONFIRMING, com transcrição LOCAL
-                                    e casamento por lista fixa de palavras
+      -> PERCEPÇÃO   Gemini transcreve o áudio                 [1 req. barata]
+      -> roteador local casa o comando?  -> executa            [0 req.]
+      -> RACIOCÍNIO  OpenRouter decide e responde              [1 req.]
+           +-- texto      -> SPEAKING, Piper por sentença em streaming
+           +-- tool call  -> guard determinístico
+                  |-- Nível 1 -> executa; se fire-and-forget, frase pronta
+                  +-- Nível 2 -> CONFIRMING, transcrição LOCAL + lista fixa
       -> retoma a escuta da palavra de ativação
+
+Ter a transcrição ANTES do raciocínio é o que faz o roteador local valer a
+pena: comandos frequentes são resolvidos sem gastar a requisição cara.
 
 Threads: a interface Qt vive na thread principal; este pipeline roda numa thread
 de trabalho e conversa com a interface só por sinais.
@@ -34,17 +35,19 @@ from james.hotkey.killswitch import GlobalHotkey, HotkeyError
 from james.llm.base import NoProviderAvailable
 from james.llm.client import LLMClient, ServiceState
 from james.llm.history import Conversation, ToolCall
-from james.llm.rate_limiter import RateLimiter
+
 from james.llm.router import LocalRouter
 from james.logs import audit, get_logger, setup_logging
+from james.memory import MemoryStore
 from james.permissions.confirm import Confirmation, ConfirmationMatcher
 from james.permissions.guard import Decision, Guard
+from james.security.pin import PinStore
 from james.security.sanitizer import sanitize_external
 from james.state.ipc import IpcClient
 from james.state.runtime_state import RuntimeState
 from james.system_prompt import build_system_prompt, first_run_instruction, greeting_instruction
 from james.tools import build_registry
-from james.ui.states import UiState
+from james.ui import UiState, build_interface
 
 logger = get_logger("james.orchestrator")
 
@@ -63,17 +66,16 @@ class Orchestrator:
         self.audio_format = config.audio
 
         self.guard = Guard(config)
-        self.registry = build_registry(config, self.guard)
         self.conversation = Conversation(
             max_turns=int(config.get("behavior.history_turns", 12))
         )
         self.runtime_state = RuntimeState(config.root / "state" / "runtime_state.json")
-
-        self.rate_limiter = RateLimiter(
-            requests_per_minute=int(config.get("llm.rate_limit.requests_per_minute", 10)),
-            requests_per_day=int(config.get("llm.rate_limit.requests_per_day", 240)),
-            state_path=config.root / "state" / "usage_counters.json",
+        self.memory = MemoryStore(
+            directory=config.resolve_path("memory.dir", "memories"),
+            max_chars=int(config.get("memory.max_chars", 4000)),
         )
+
+        self.registry = build_registry(config, self.guard, self.memory)
         self.router = LocalRouter(
             self.guard.apps, enabled=bool(config.get("llm.local_router.enabled", True))
         )
@@ -87,22 +89,21 @@ class Orchestrator:
         self.tts = self._build_tts()
         self.player = None
         self.speaker = None
-
-        # Precisa existir antes do LLMClient: ele guarda uma referência a este
-        # atributo para o fallback em texto.
-        self._last_transcript: str | None = None
         self._greeted = False
 
         self.llm = LLMClient(
             config=config,
-            system_prompt=build_system_prompt(config),
+            system_prompt=build_system_prompt(config, self.memory.snapshot()),
             tools=self.registry.schemas(),
-            rate_limiter=self.rate_limiter,
-            transcribe_fallback=lambda: self._last_transcript,
         )
+        self.registry.attach_llm(self.llm)
 
-        self.overlay = None
+        self.pin_store = PinStore(config.root / "state" / "pin.json")
+
+        self.interface = None
         self.tray = None
+        self.screen_grabber = None
+        self.confirm_dialog = None
         self.hotkey: GlobalHotkey | None = None
         self.ipc: IpcClient | None = None
 
@@ -111,7 +112,6 @@ class Orchestrator:
         self._running = threading.Event()
         self._cancelled = threading.Event()
         self._paused = False
-        self._transcription_thread: threading.Thread | None = None
         self._announced_state: ServiceState | None = None
 
     # ------------------------------------------------------------ construção
@@ -129,9 +129,8 @@ class Orchestrator:
                 threads=int(self.config.get("stt.threads", 4)),
             )
         except STTUnavailable as exc:
-            # Sem STT o James ainda conversa (o áudio vai direto ao Gemini), mas
-            # perde o modo offline e a confirmação de risco. Isso precisa ser
-            # ruidoso, não silencioso.
+            # Sem STT o James ainda conversa (a percepção acontece na nuvem),
+            # mas perde o modo offline e a confirmação de risco.
             logger.warning("Transcrição local indisponível: %s", exc)
             return None
 
@@ -154,24 +153,31 @@ class Orchestrator:
         """Sobe a interface Qt e o pipeline. Bloqueia até o James encerrar."""
         from PySide6.QtWidgets import QApplication
 
-        from james.ui.overlay import Overlay
         from james.ui.tray import Tray
 
         app = QApplication.instance() or QApplication(sys.argv)
-        app.setQuitOnLastWindowClosed(False)   # o overlay some, o James continua
+        app.setQuitOnLastWindowClosed(False)   # fechar a janela não encerra o James
 
-        if bool(self.config.get("overlay.enabled", True)):
-            self.overlay = Overlay(
-                size=int(self.config.get("overlay.size", 260)),
-                position=str(self.config.get("overlay.position", "bottom-right")),
-                margin=int(self.config.get("overlay.margin", 40)),
-                fps=int(self.config.get("overlay.fps", 30)),
-            )
+        # Criado aqui, na thread da interface: é dela que o Qt permite capturar
+        # a tela, e o objeto precisa pertencer a essa thread para o sinal ser
+        # entregue no lugar certo.
+        from james.ui.capture import ScreenGrabber
+        from james.ui.confirm_dialog import ConfirmDialogBridge
 
-        self.tray = Tray(app_name=str(self.config.get("persona.nome", "James")))
+        app_name = str(self.config.get("persona.nome", "James"))
+        self.screen_grabber = ScreenGrabber()
+        self.registry.attach_screen_grabber(self.screen_grabber)
+        self.confirm_dialog = ConfirmDialogBridge(app_name=app_name)
+        self.interface = build_interface(self.config, app_name)
+        if self.interface is not None:
+            self.interface.cancel_requested.connect(self.cancel)
+            self.interface.toggle_listening.connect(self._toggle_pause)
+
+        self.tray = Tray(app_name=app_name)
         self.tray.toggle_listening.connect(self._toggle_pause)
         self.tray.cancel_requested.connect(self.cancel)
         self.tray.quit_requested.connect(app.quit)
+        self.tray.activated.connect(self._on_tray_activated)
         self.tray.show()
 
         self._start_audio_output()
@@ -183,9 +189,20 @@ class Orchestrator:
         self._worker.start()
         threading.Thread(target=self._heartbeat_loop, name="heartbeat", daemon=True).start()
 
+        self._publish_quota()
         app.aboutToQuit.connect(self.shutdown)
         logger.info("James pronto. Diga a palavra de ativação.")
         return app.exec()
+
+    def _on_tray_activated(self, reason) -> None:
+        """Clique no ícone mostra a janela (no modo janela)."""
+        from PySide6.QtWidgets import QSystemTrayIcon
+
+        if reason != QSystemTrayIcon.Trigger or self.interface is None:
+            return
+        if hasattr(self.interface, "showNormal"):
+            self.interface.showNormal()
+            self.interface.raise_()
 
     def _start_audio_output(self) -> None:
         from james.audio.player import AudioPlayer
@@ -223,11 +240,7 @@ class Orchestrator:
         self.ipc.start()
 
     def _heartbeat_loop(self) -> None:
-        """Sinal de vida para o watchdog do processo 1.
-
-        Iniciado só depois de `_running`, senão a condição de parada leria o
-        estado de antes da subida e o laço nunca terminaria.
-        """
+        """Sinal de vida para o watchdog do processo 1."""
         interval = max(1.0, float(self.config.get("ipc.heartbeat_s", 5)))
         while self._running.is_set():
             if self.ipc is not None:
@@ -274,6 +287,8 @@ class Orchestrator:
         self._paused = not self._paused
         if self.tray is not None:
             self.tray.set_listening(not self._paused)
+        if self.interface is not None:
+            self.interface.set_listening(not self._paused)
         self._send_ipc("pause_wake" if self._paused else "resume_wake")
         logger.info("Escuta %s.", "pausada" if self._paused else "retomada")
 
@@ -306,6 +321,7 @@ class Orchestrator:
                     self._say("Tive um problema interno, senhor.")
                 finally:
                     self._set_ui(UiState.HIDDEN)
+                    self._publish_quota()
                     self._resume_wake()
 
     # ----------------------------------------------------------------- turno
@@ -328,17 +344,53 @@ class Orchestrator:
             self._resume_wake()
 
         self._set_ui(UiState.THINKING)
-        history_index = self.conversation.add_user_audio()
-        self._start_background_transcription(pcm, history_index)
+
+        transcript = self._perceive(pcm)
+        if not transcript:
+            logger.info("Nada inteligível no comando.")
+            self._say("Não consegui entender, senhor.")
+            return
+
+        logger.info("Comando: %s", transcript)
+        audit("comando", texto=transcript)
+        self._show_transcript("voce", transcript)
+        self.conversation.add_user_text(transcript)
+
+        # Roteador local: comandos frequentes não gastam a requisição cara.
+        match = self.router.match(transcript)
+        if match is not None:
+            logger.info("Atendido localmente: %s", match.tool)
+            audit("roteador_local", tool=match.tool, args=match.args)
+            self._execute_one(
+                ToolCall(name=match.tool, args=match.args), spoke_already=False
+            )
+            return
 
         try:
-            self._llm_turn(pcm)
+            self._reason_turn(transcript)
         except NoProviderAvailable as exc:
-            logger.warning("Sem provedor de LLM: %s", exc)
-            self._degraded_turn(pcm)
+            logger.warning("Sem provedor de raciocínio: %s", exc)
+            self._degraded_turn()
 
-    def _llm_turn(self, pcm: bytes) -> None:
+    def _perceive(self, pcm: bytes) -> str | None:
+        """PERCEPÇÃO — áudio para texto, com queda para o STT local.
+
+        A nuvem é preferida porque é muito mais rápida numa CPU modesta; o
+        whisper.cpp entra quando ela não está disponível, que é exatamente o
+        caso em que o James precisa continuar funcionando sozinho.
+        """
         wav = pcm_to_wav(pcm, self.audio_format)
+        transcript = self.llm.transcribe(wav)
+        if transcript:
+            return transcript
+
+        if self.stt is None:
+            return None
+        logger.info("Percepção na nuvem indisponível; usando whisper.cpp local.")
+        return self.stt.transcribe(pcm)
+
+    def _reason_turn(self, transcript: str) -> None:
+        """RACIOCÍNIO — decide o que fazer e responde."""
         speaker = self.speaker
         if speaker is not None:
             speaker.begin()
@@ -352,10 +404,10 @@ class Orchestrator:
             if speaker is not None:
                 speaker.feed(chunk)
 
-        response = self.llm.respond(
+        response = self.llm.reason(
             self.conversation,
-            audio_wav=wav,
-            text=self._turn_instruction(),
+            text=transcript,
+            instruction=self._turn_instruction(),
             on_text=on_text,
         )
         self._announce_service_state()
@@ -368,6 +420,8 @@ class Orchestrator:
         # realmente ouviu — não o que o modelo chegou a gerar.
         model_text = response.text if spoken_ok else (speaker.spoken_text if speaker else "")
         self.conversation.add_model_response(model_text, response.tool_calls)
+        if model_text:
+            self._show_transcript("james", model_text)
 
         if response.tool_calls:
             self._run_tool_calls(response.tool_calls, spoke_already=started_speaking.is_set())
@@ -451,7 +505,7 @@ class Orchestrator:
         if speaker is not None:
             speaker.begin()
         try:
-            response = self.llm.respond(
+            response = self.llm.reason(
                 self.conversation,
                 text="Relate o resultado ao usuário em uma ou duas frases.",
                 on_text=speaker.feed if speaker is not None else None,
@@ -466,80 +520,115 @@ class Orchestrator:
         if speaker is not None:
             speaker.finish()
         self.conversation.add_model_response(response.text, response.tool_calls)
+        if response.text:
+            self._show_transcript("james", response.text)
 
     # ------------------------------------------------------------ confirmação
 
     def _ask_confirmation(self, question: str) -> bool:
         """Nível 2 — decisão local e determinística, sem LLM (C2).
 
-        Toda saída que não for um "sim" explícito nega: resposta ambígua,
-        silêncio, timeout e falha de transcrição levam ao mesmo lugar.
+        Dois caminhos, e ambos negam por padrão:
+
+        - por VOZ: grava, transcreve LOCALMENTE (nunca na nuvem — esta é a
+          última barreira antes de algo irreversível e não pode depender de
+          rede) e casa contra listas fixas de palavras;
+        - por DIÁLOGO: uma janela com Confirmar/Cancelar, e o campo de PIN
+          quando ele está configurado.
+
+        O diálogo existe porque a voz depende do whisper.cpp: sem ele, TODA
+        ação de Nível 2 seria recusada. Ele também é mais privado — digitar um
+        PIN não avisa a sala inteira.
         """
-        if self.stt is None:
-            # Sem transcrição local não há como confirmar com segurança, e
-            # aceitar sem confirmar seria exatamente o buraco que o Nível 2
-            # existe para fechar.
-            logger.error("Confirmação impossível: transcrição local indisponível.")
-            self._say(
-                "Não consigo confirmar isso por voz agora, senhor, então não vou executar."
-            )
-            audit("confirmacao_impossivel", motivo="stt_indisponivel")
+        config = self.config.section("permissions.confirm")
+        mode = str(config.get("mode", "auto")).lower()
+        pin_required = self.pin_store is not None and self.pin_store.configured
+
+        self._set_ui(UiState.CONFIRMING)
+
+        # Com PIN configurado, a prova é digitada: a voz não tem como fornecê-la.
+        if pin_required or mode == "dialogo" or self.stt is None:
+            if self.stt is None and mode != "dialogo" and not pin_required:
+                logger.info("Sem transcrição local; confirmando pela janela.")
+            return self._confirm_by_dialog(question, pin_required)
+
+        decision = self._confirm_by_voice(question, config)
+        if decision is Confirmation.YES:
+            return True
+        if decision is Confirmation.NO:
             return False
 
-        config = self.config.section("permissions.confirm")
+        # Voz inconclusiva: a janela é a última chance, e ela também nega por
+        # padrão (foco em Cancelar, timeout nega).
+        logger.info("Confirmação por voz inconclusiva; abrindo a janela.")
+        return self._confirm_by_dialog(question, pin_required)
+
+    def _confirm_by_voice(self, question: str, config: dict) -> Confirmation:
         attempts = max(1, int(config.get("max_attempts", 2)))
         timeout_s = float(config.get("timeout_s", 10))
 
-        self._set_ui(UiState.CONFIRMING)
         for attempt in range(attempts):
             prompt = question if attempt == 0 else "Não entendi. Confirma ou cancela?"
             self._say(prompt)
             if self._cancelled.is_set():
-                return False
+                return Confirmation.NO
 
             pcm = self._record(max_wait_ms=int(timeout_s * 1000))
             if pcm is None:
-                audit("confirmacao", resultado="sem_resposta", tentativa=attempt + 1)
+                audit("confirmacao_voz", resultado="sem_resposta", tentativa=attempt + 1)
                 continue
 
             transcript = self.stt.transcribe(pcm)
             decision = self.confirm_matcher.classify(transcript)
             audit(
-                "confirmacao",
+                "confirmacao_voz",
                 resultado=decision.value,
                 transcricao=transcript,
                 tentativa=attempt + 1,
             )
+            if transcript:
+                self._show_transcript("voce", transcript)
+            if decision in (Confirmation.YES, Confirmation.NO):
+                return decision
 
-            if decision is Confirmation.YES:
-                return True
-            if decision is Confirmation.NO:
-                return False
+        return Confirmation.AMBIGUOUS
 
-        logger.info("Confirmação não obtida após %d tentativa(s); negando.", attempts)
-        return False
+    def _confirm_by_dialog(self, question: str, require_pin: bool) -> bool:
+        if self.confirm_dialog is None:
+            logger.error("Sem interface para confirmar; negando por segurança.")
+            audit("confirmacao_impossivel", motivo="sem_dialogo")
+            self._say("Não consigo confirmar isso agora, senhor, então não vou executar.")
+            return False
+
+        self._say(question)
+        aprovado, pin = self.confirm_dialog.ask(question, require_pin=require_pin)
+
+        if not aprovado:
+            audit("confirmacao_dialogo", resultado="negado")
+            return False
+        if require_pin and not self.pin_store.verify(pin):
+            # Não diz se o PIN errou por tamanho ou por valor.
+            audit("confirmacao_dialogo", resultado="pin_incorreto")
+            self._say("PIN incorreto, senhor.")
+            return False
+
+        audit("confirmacao_dialogo", resultado="aprovado", com_pin=require_pin)
+        return True
 
     # ------------------------------------------------------------ degradado
 
-    def _degraded_turn(self, pcm: bytes) -> None:
-        """Sem LLM: sobra o roteador local sobre a transcrição local (A5)."""
+    def _degraded_turn(self) -> None:
+        """Sem raciocínio disponível: sobra o roteador local (A5).
+
+        Chegar aqui significa que o roteador já não casou o comando lá em cima,
+        então não há o que executar — resta ser honesto sobre a limitação.
+        """
         self._announce_service_state()
-        transcript = self._last_transcript
-        if transcript is None and self.stt is not None:
-            transcript = self.stt.transcribe(pcm)
-
-        match = self.router.match(transcript)
-        if match is None:
-            self._set_ui(UiState.ERROR)
-            self._say(
-                "Estou com capacidade limitada no momento, senhor. "
-                "Só consigo executar comandos diretos."
-            )
-            return
-
-        logger.info("Comando atendido localmente: %s", match.tool)
-        audit("roteador_local", tool=match.tool, args=match.args, modo="degradado")
-        self._execute_one(ToolCall(name=match.tool, args=match.args), spoke_already=False)
+        self._set_ui(UiState.ERROR)
+        self._say(
+            "Estou com capacidade limitada no momento, senhor. "
+            "Só consigo executar comandos diretos."
+        )
 
     def _announce_service_state(self) -> None:
         """Avisa a mudança de estado uma única vez, não a cada turno."""
@@ -594,53 +683,29 @@ class Orchestrator:
 
         return recorder.audio()
 
-    def _start_background_transcription(self, pcm: bytes, history_index: int) -> None:
-        """Transcreve em segundo plano, enquanto o James já está respondendo.
-
-        Serve para dois fins sem custar latência: preencher o histórico com o
-        que o usuário realmente disse (senão o modelo perde o contexto de
-        perguntas de acompanhamento) e ter o texto pronto caso o fallback
-        precise dele.
-        """
-        self._last_transcript = None
-        if self.stt is None:
-            return
-        if self._transcription_thread is not None and self._transcription_thread.is_alive():
-            # Numa CPU sem AVX o whisper é lento; empilhar transcrições só
-            # tomaria núcleos do pipeline que importa.
-            logger.debug("Transcrição anterior ainda em curso; pulando esta.")
-            return
-
-        def work() -> None:
-            try:
-                text = self.stt.transcribe(pcm)
-            except Exception:  # noqa: BLE001 — auxiliar, nunca crítica
-                logger.exception("Transcrição em segundo plano falhou.")
-                return
-            if text:
-                self._last_transcript = text
-                self.conversation.set_user_transcript(history_index, text)
-
-        self._transcription_thread = threading.Thread(
-            target=work, name="transcricao", daemon=True
-        )
-        self._transcription_thread.start()
-
     # ------------------------------------------------------------- interface
 
     def _set_ui(self, state: UiState) -> None:
         degraded = self.llm.state.degraded
-        if self.overlay is not None:
+        if self.interface is not None:
             if state is UiState.HIDDEN:
-                self.overlay.request_hide.emit()
+                self.interface.request_hide.emit()
             else:
-                self.overlay.request_state.emit(state.value, degraded)
+                self.interface.request_state.emit(state.value, degraded)
         if self.tray is not None:
             self.tray.set_state(state, degraded)
 
     def _show_caption(self, text: str) -> None:
-        if self.overlay is not None:
-            self.overlay.request_caption.emit(text)
+        if self.interface is not None:
+            self.interface.request_caption.emit(text)
+
+    def _show_transcript(self, who: str, text: str) -> None:
+        if self.interface is not None:
+            self.interface.request_transcript.emit(who, text)
+
+    def _publish_quota(self) -> None:
+        if self.interface is not None:
+            self.interface.request_quota.emit(self.llm.quota_summary())
 
     def _say(self, text: str) -> None:
         """Fala uma frase pronta do próprio James (não vinda do modelo)."""
@@ -648,6 +713,7 @@ class Orchestrator:
             return
         self._set_ui(UiState.SPEAKING)
         self._show_caption(text)
+        self._show_transcript("james", text)
         if self.speaker is None:
             logger.info("[sem voz] %s", text)
             return
@@ -669,10 +735,10 @@ class Orchestrator:
     def _turn_instruction(self) -> str | None:
         """Instrução extra a anexar ao primeiro turno, se houver.
 
-        A saudação viaja JUNTO com o áudio do comando, na mesma requisição, em
-        vez de virar uma chamada só para cumprimentar. Assim ela não custa
-        requisição nem atraso — que era exatamente o motivo de a pesquisa
-        original querer gerá-la "em paralelo" com a escuta.
+        A saudação viaja JUNTO com o comando, na mesma requisição, em vez de
+        virar uma chamada só para cumprimentar. Assim ela não custa requisição
+        nem atraso — que era exatamente o motivo de a pesquisa original querer
+        gerá-la "em paralelo" com a escuta.
         """
         if self._greeted:
             return None

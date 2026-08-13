@@ -33,6 +33,8 @@ logger = get_logger("james.llm.gemini")
 
 class GeminiProvider:
     name = "gemini"
+    accepts_audio = True
+    accepts_image = True
 
     def __init__(
         self,
@@ -127,6 +129,51 @@ class GeminiProvider:
             tool_calls=tool_calls,
             provider=self.name,
             model=self.model,
+        )
+
+    def generate_with_image(
+        self,
+        conversation: Conversation,
+        image: bytes,
+        mime_type: str = "image/png",
+        text: str = "Descreva o que aparece nesta imagem.",
+        instruction: str | None = None,
+        tools: list[ToolSchema] | None = None,
+        on_text: TextCallback | None = None,
+    ) -> LLMResponse:
+        """Papel de VISÃO — analisa uma captura de tela ou foto da câmera."""
+        if not image:
+            raise ProviderError("Nenhuma imagem para analisar.")
+
+        types = self._types
+        parts = [types.Part.from_text(text=text)]
+        parts.append(types.Part.from_bytes(data=image, mime_type=mime_type))
+        contents = [types.Content(role="user", parts=parts)]
+
+        started = time.monotonic()
+        collected: list[str] = []
+        try:
+            stream = self._client.models.generate_content_stream(
+                model=self.model, contents=contents, config=self._build_config(tools)
+            )
+            for chunk in stream:
+                piece, _ = self._read_chunk(chunk)
+                if piece:
+                    collected.append(piece)
+                    if on_text is not None:
+                        on_text(piece)
+        except Exception as exc:  # noqa: BLE001 — o SDK levanta tipos variados
+            if looks_like_quota_error(exc):
+                raise QuotaExceeded(f"Gemini recusou por cota: {exc}") from exc
+            raise ProviderError(f"Falha ao analisar imagem: {exc}") from exc
+
+        logger.info(
+            "Gemini analisou imagem de %d KB em %.2fs",
+            len(image) // 1024,
+            time.monotonic() - started,
+        )
+        return LLMResponse(
+            text="".join(collected).strip(), provider=self.name, model=self.model
         )
 
     def _read_chunk(self, chunk: Any) -> tuple[str, list[ToolCall]]:

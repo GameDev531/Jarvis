@@ -19,11 +19,12 @@ from __future__ import annotations
 import ipaddress
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import PurePath
 from typing import Any, Callable
 from urllib.parse import unquote, urlsplit
 
 from james.config import Config, normalize_text
-from james.permissions.paths import PathGuard
+from james.permissions.paths import PathGuard, PathNotAllowed
 from james.security.sanitizer import strip_dangerous_chars
 
 MAX_URL_LENGTH = 2048
@@ -70,14 +71,32 @@ class Guard:
         self.blocked_schemes = set(config.normalized_list("permissions.blocked_url_schemes"))
         self.require_https = bool(config.get("permissions.require_https", True))
 
+        self.vision_requires_confirmation = bool(
+            config.get("permissions.vision_requires_confirmation", True)
+        )
+
         self._rules: dict[str, Callable[[dict[str, Any]], GuardVerdict]] = {
+            # --- baixo risco, executa direto ---
             "abrir_app": self._rule_abrir_app,
-            "fechar_app": self._rule_fechar_app,
             "abrir_pagina": self._rule_abrir_pagina,
             "pesquisar_web": self._rule_pesquisar_web,
             "ajustar_volume": self._rule_ajustar_volume,
             "que_horas_sao": self._rule_sem_risco,
             "info_sistema": self._rule_sem_risco,
+            # --- memória: nota pessoal, não ação no sistema ---
+            "lembrar": self._rule_sem_risco,
+            "esquecer": self._rule_sem_risco,
+            "atualizar_memoria": self._rule_sem_risco,
+            "consultar_memoria": self._rule_sem_risco,
+            # --- arquivos ---
+            "listar_arquivos": self._rule_listar_arquivos,
+            "organizar_arquivos": self._rule_organizar_arquivos,
+            "mover_arquivo": self._rule_mover_arquivo,
+            "renomear_arquivo": self._rule_renomear_arquivo,
+            # --- sensíveis ---
+            "fechar_app": self._rule_fechar_app,
+            "ver_tela": self._rule_ver_tela,
+            "ver_camera": self._rule_ver_camera,
         }
 
     # ------------------------------------------------------------ entrada
@@ -201,6 +220,141 @@ class Guard:
             reason="ajuste de volume é reversível e local",
             spoken="",
             args={"acao": action},
+        )
+
+    # ---------------------------------------------------------- arquivos
+
+    def _resolved_path(self, tool: str, field: str, args: dict[str, Any]):
+        """Valida um caminho contra a whitelist. Devolve (caminho, veredito_de_erro)."""
+        raw = strip_dangerous_chars(str(args.get(field, "") or "")).strip()
+        if not raw:
+            return None, self._block(tool, f"campo '{field}' vazio", "Qual pasta ou arquivo, {t}?")
+        try:
+            return self.path_guard.validate(raw), None
+        except PathNotAllowed as exc:
+            return None, self._block(
+                tool,
+                f"{field}: {exc}",
+                "Esse caminho está fora das pastas que posso tocar, {t}.",
+            )
+
+    def _rule_listar_arquivos(self, args: dict[str, Any]) -> GuardVerdict:
+        path, blocked = self._resolved_path("listar_arquivos", "pasta", args)
+        if blocked is not None:
+            return blocked
+        # Somente leitura dentro da whitelist: não altera nada.
+        return GuardVerdict(
+            tool="listar_arquivos",
+            decision=Decision.ALLOW,
+            reason=f"leitura de '{path}' dentro da whitelist",
+            spoken="",
+            args={"pasta": str(path)},
+        )
+
+    def _rule_organizar_arquivos(self, args: dict[str, Any]) -> GuardVerdict:
+        path, blocked = self._resolved_path("organizar_arquivos", "pasta", args)
+        if blocked is not None:
+            return blocked
+        # Move muitos arquivos de uma vez: desfazer à mão seria trabalhoso.
+        return GuardVerdict(
+            tool="organizar_arquivos",
+            decision=Decision.CONFIRM,
+            reason=f"move vários arquivos em '{path}'",
+            spoken=(
+                f"Vou reorganizar os arquivos de {path.name} em subpastas por tipo. "
+                f"Confirma, {self.treatment}?"
+            ),
+            args={"pasta": str(path)},
+        )
+
+    def _rule_mover_arquivo(self, args: dict[str, Any]) -> GuardVerdict:
+        origem, blocked = self._resolved_path("mover_arquivo", "origem", args)
+        if blocked is not None:
+            return blocked
+        # O destino também é validado: checar só a origem deixaria passar um
+        # "mover para fora da whitelist", que é o bypass clássico aqui.
+        destino, blocked = self._resolved_path("mover_arquivo", "destino", args)
+        if blocked is not None:
+            return blocked
+        return GuardVerdict(
+            tool="mover_arquivo",
+            decision=Decision.CONFIRM,
+            reason=f"move '{origem}' para '{destino}'",
+            spoken=(
+                f"Vou mover {origem.name} para {destino.name}. Confirma, {self.treatment}?"
+            ),
+            args={"origem": str(origem), "destino": str(destino)},
+        )
+
+    def _rule_renomear_arquivo(self, args: dict[str, Any]) -> GuardVerdict:
+        caminho, blocked = self._resolved_path("renomear_arquivo", "caminho", args)
+        if blocked is not None:
+            return blocked
+
+        novo_nome = strip_dangerous_chars(str(args.get("novo_nome", "") or "")).strip()
+        if not novo_nome:
+            return self._block("renomear_arquivo", "novo nome vazio", "Qual o novo nome, {t}?")
+        # Um nome com separador de caminho é travessia disfarçada de renomeação.
+        if PurePath(novo_nome).name != novo_nome or novo_nome in (".", ".."):
+            return self._block(
+                "renomear_arquivo",
+                f"novo nome contém caminho: {novo_nome!r}",
+                "O novo nome não pode conter barras nem pastas, {t}.",
+            )
+
+        return GuardVerdict(
+            tool="renomear_arquivo",
+            decision=Decision.CONFIRM,
+            reason=f"renomeia '{caminho}' para '{novo_nome}'",
+            spoken=(
+                f"Vou renomear {caminho.name} para {novo_nome}. Confirma, {self.treatment}?"
+            ),
+            args={"caminho": str(caminho), "novo_nome": novo_nome},
+        )
+
+    # ----------------------------------------------------------- visão
+
+    def _rule_ver_tela(self, args: dict[str, Any]) -> GuardVerdict:
+        pergunta = strip_dangerous_chars(str(args.get("pergunta", "") or "")).strip()
+        if not self.vision_requires_confirmation:
+            return GuardVerdict(
+                tool="ver_tela",
+                decision=Decision.ALLOW,
+                reason="confirmação de visão desativada no config",
+                spoken="",
+                args={"pergunta": pergunta},
+            )
+        # A tela pode conter senha, banco, conversa privada — e a captura sai
+        # da máquina para ser analisada. Perguntar antes é o padrão.
+        return GuardVerdict(
+            tool="ver_tela",
+            decision=Decision.CONFIRM,
+            reason="captura de tela é enviada para análise na nuvem",
+            spoken=(
+                f"Vou capturar sua tela e enviá-la para análise. Confirma, {self.treatment}?"
+            ),
+            args={"pergunta": pergunta},
+        )
+
+    def _rule_ver_camera(self, args: dict[str, Any]) -> GuardVerdict:
+        pergunta = strip_dangerous_chars(str(args.get("pergunta", "") or "")).strip()
+        if not self.vision_requires_confirmation:
+            return GuardVerdict(
+                tool="ver_camera",
+                decision=Decision.ALLOW,
+                reason="confirmação de visão desativada no config",
+                spoken="",
+                args={"pergunta": pergunta},
+            )
+        return GuardVerdict(
+            tool="ver_camera",
+            decision=Decision.CONFIRM,
+            reason="foto da webcam é enviada para análise na nuvem",
+            spoken=(
+                f"Vou tirar uma foto pela webcam e enviá-la para análise. "
+                f"Confirma, {self.treatment}?"
+            ),
+            args={"pergunta": pergunta},
         )
 
     # -------------------------------------------------------------- URLs

@@ -40,27 +40,51 @@ behavior:
   history_turns: 12           # turnos mantidos no histórico enviado ao LLM
 
 llm:
+  # Divisão de trabalho entre os modelos. A ordem é a preferência: se o
+  # primeiro falhar ou estourar cota, o seguinte assume.
+  #   perception = ouvir e transcrever  -> Gemini (aceita áudio)
+  #   vision     = ver tela e câmera    -> Gemini (aceita imagem)
+  #   reasoning  = decidir, escrever,   -> OpenRouter (modelos de texto maiores,
+  #                chamar ferramentas      cota independente da do Gemini)
+  roles:
+    perception: [gemini]
+    reasoning: [openrouter, gemini]
+    vision: [gemini]
+
   gemini:
     model: gemini-2.5-flash
     thinking_budget: 0        # desliga o "thinking" — latência menor no caminho de voz
     timeout_s: 30
     max_output_tokens: 800
     temperature: 0.7
+
   openrouter:
-    # Fallback para 429 do Gemini. A cota diária do OpenRouter é POR CONTA e
-    # compartilhada entre TODOS os modelos :free — a lista abaixo protege contra
-    # 429 por minuto, não multiplica a cota diária.
+    # A cota diária do OpenRouter é POR CONTA e compartilhada entre TODOS os
+    # modelos :free — 50/dia sem crédito, 1.000/dia com US$ 10 vitalícios,
+    # 20/min sempre. A lista abaixo protege contra o 429 momentâneo de um
+    # modelo; ela NÃO multiplica a cota diária.
     enabled: true
-    timeout_s: 30
+    timeout_s: 60
     cooldown_s: 60            # tempo que um modelo fica em resfriamento após 429
+    temperature: 0.7
+    max_output_tokens: 1200
     models:
       - meta-llama/llama-3.3-70b-instruct:free
       - qwen/qwen-2.5-72b-instruct:free
+      - deepseek/deepseek-chat-v3-0324:free
       - google/gemma-2-9b-it:free
       - mistralai/mistral-7b-instruct:free
+
+  # Cotas separadas: os dois provedores têm limites independentes, e tratá-los
+  # como um balde só desperdiçaria metade da capacidade diária.
   rate_limit:
-    requests_per_minute: 10
-    requests_per_day: 240     # conservador; ajuste conforme sua cota real
+    gemini:
+      requests_per_minute: 10
+      requests_per_day: 240
+    openrouter:
+      requests_per_minute: 15
+      requests_per_day: 45    # suba para ~900 se comprar US$ 10 de crédito
+
   local_router:
     enabled: true             # casa comandos frequentes sem gastar requisição
 
@@ -80,13 +104,21 @@ stt:
   timeout_s: 60
   threads: 4
 
-overlay:
+interface:
   enabled: true
-  position: bottom-right      # bottom-right | bottom-center | top-right | center
-  size: 260                   # px
+  # window = janela comum do Python, com barra de título, que você move,
+  #          minimiza e fecha como qualquer programa. É o padrão: não fica por
+  #          cima de nada, não força composição de tela e não interfere no
+  #          resto do sistema.
+  # hud    = painel pequeno, sem borda, sempre no topo e transparente a
+  #          cliques. Mais bonito, mas exige compositor e pesa mais.
+  mode: window
+  position: bottom-right      # só no modo hud
+  size: 260                   # px do orbe (hud) / largura mínima (window)
   margin: 40
   fps: 30
-  profile: light              # light = QPainter puro (Fase 1). "full" reservado p/ Fase 3.
+  start_minimized: true       # a janela sobe minimizada e aparece ao ser chamado
+  show_transcript: true       # mostra o que foi ouvido e o que foi respondido
 
 killswitch:
   enabled: true
@@ -99,7 +131,23 @@ ipc:
   heartbeat_timeout_s: 30
   restart_backoff_s: [2, 4, 8, 16, 30]
 
+memory:
+  # Memória curada em markdown. Você pode abrir e editar estes arquivos à mão.
+  # Ela nasce só das conversas — o James não lê e-mail, arquivos nem histórico.
+  dir: memories
+  max_chars: 4000            # limite POR ARQUIVO; força guardar só o essencial
+
+camera:
+  device_index: 0            # 0 = webcam padrão
+
 permissions:
+  # Capturar a tela ou tirar foto pela webcam envia a imagem para análise na
+  # nuvem. A tela pode ter senha, banco, conversa privada; a câmera é a sua
+  # imagem. Por isso o padrão é perguntar antes, toda vez.
+  # ATENÇÃO: deixar em `true` exige whisper.cpp instalado — sem confirmação por
+  # voz, essas ações são recusadas.
+  vision_requires_confirmation: true
+
   # --------- Nível 1: executa direto ---------
   # Apps permitidos. Chave = como você fala; valor = comando/executável.
   apps:
@@ -149,8 +197,13 @@ permissions:
     - ftp
 
   confirm:
+    # auto    = por voz quando o whisper.cpp existe, por janela quando não
+    # voz     = sempre por voz (se o STT faltar, a janela assume mesmo assim)
+    # dialogo = sempre por janela — mais privado, não avisa a sala inteira
+    # Com PIN configurado (python set_pin.py), é sempre por janela.
+    mode: auto
     timeout_s: 10             # sem resposta = negado
-    max_attempts: 2           # resposta ambígua = mais uma chance, depois nega
+    max_attempts: 2           # resposta ambígua = mais uma chance, depois a janela
     # Casamento determinístico — nunca passa pelo LLM (C2)
     yes_words: [sim, confirmo, confirmado, pode, pode sim, positivo, isso, claro, autorizo, prossiga, manda, ok, okay]
     no_words: [nao, não, negativo, cancela, cancelar, para, pare, esquece, aborta, abortar, deixa, melhor nao, melhor não]

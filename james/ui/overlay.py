@@ -1,11 +1,13 @@
-"""Overlay HUD desenhado com QPainter puro.
+"""HUD flutuante — modo alternativo da interface (`interface.mode: hud`).
 
-Por que não QWebEngineView aqui (E4 do plano): um QWebEngineView é um Chromium
-embutido — algo entre 150 e 300 MB de RAM e um processo de GPU só para mostrar
-um HUD, competindo com o pipeline de voz justamente na máquina que já é o
-gargalo. Um QWidget com QPainter entrega orbe, legenda e a transição de "TV de
-tubo" por um custo perto de zero. O QWebEngine entra quando holograma e painéis
-dinâmicos justificarem o preço.
+É o painel pequeno, sem borda, sempre no topo e transparente a cliques, com a
+transição de "TV de tubo" na entrada e na saída.
+
+Custa mais que a janela comum: exige composição de tela ativa e faz o
+compositor redesenhar o que está por baixo a cada quadro. Numa máquina modesta
+isso pesa no sistema inteiro, não só no James — por isso o padrão é
+`interface.mode: window`. Use este modo se a sua máquina aguenta e você quer a
+estética.
 
 Sobre threads: o orquestrador roda numa thread de trabalho e a interface Qt na
 thread principal. Toda comunicação passa por sinais Qt, que são enfileirados
@@ -17,18 +19,21 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import Qt, QElapsedTimer, QPointF, QRectF, QTimer, Signal
-from PySide6.QtGui import (
-    QColor,
-    QFont,
-    QPainter,
-    QPainterPath,
-    QPen,
-    QRadialGradient,
-)
+from PySide6.QtCore import QElapsedTimer, QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QPainter, QPen, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
 from james.logs import get_logger
+from james.ui.painting import (
+    angular_path,
+    draw_orb,
+    draw_scan_ring,
+    draw_scanlines,
+    draw_vignette,
+    ease_in,
+    ease_out,
+    pulse,
+)
 from james.ui.states import PULSE_RATE, UiState, caption_for, palette_for
 
 logger = get_logger("james.ui.overlay")
@@ -40,45 +45,29 @@ _CLOSE_SECONDS = 0.30
 _LINE_THRESHOLD = 0.35
 
 
-def _ease_out(t: float) -> float:
-    return 1.0 - (1.0 - t) ** 3
-
-
-def _ease_in(t: float) -> float:
-    return t * t * t
-
-
-def _pulse(elapsed: float, rate: float) -> float:
-    """Pulsação por ondas sobrepostas, entre 0 e 1.
-
-    Um seno simples fica mecânico e previsível. Somando frequências diferentes
-    e elevando uma delas a uma potência alta (surtos raros e súbitos), o brilho
-    ganha uma respiração que não parece um loop.
-    """
-    if rate <= 0:
-        return 0.5
-    base = 0.5 + 0.5 * math.sin(elapsed * rate)
-    fast = 0.5 + 0.5 * math.sin(elapsed * rate * 2.7 + 1.3)
-    surge = max(0.0, math.sin(elapsed * rate * 0.37)) ** 8
-    return min(1.0, 0.5 * base + 0.22 * fast + 0.35 * surge)
-
-
 class Overlay(QWidget):
     """HUD sem borda, sempre no topo, que não intercepta o mouse."""
 
-    # Emitidos de outras threads; o Qt entrega na thread da interface.
-    request_state = Signal(str, bool)   # estado, degradado
+    request_state = Signal(str, bool)
     request_caption = Signal(str)
     request_hide = Signal()
+    request_transcript = Signal(str, str)
+    request_quota = Signal(dict)
+
+    cancel_requested = Signal()
+    toggle_listening = Signal()
 
     def __init__(
         self,
+        app_name: str = "James",
         size: int = 260,
         position: str = "bottom-right",
         margin: int = 40,
         fps: int = 30,
+        **_ignored,
     ) -> None:
         super().__init__(None)
+        self.app_name = app_name
         self.setWindowFlags(
             Qt.FramelessWindowHint
             | Qt.WindowStaysOnTopHint
@@ -108,14 +97,15 @@ class Overlay(QWidget):
         self._clock.start()
         self._last_tick = 0.0
 
-        interval = max(16, int(1000 / max(1, int(fps))))
         self._timer = QTimer(self)
-        self._timer.setInterval(interval)
+        self._timer.setInterval(max(16, int(1000 / max(1, int(fps)))))
         self._timer.timeout.connect(self._tick)
 
         self.request_state.connect(self._on_state)
         self.request_caption.connect(self._on_caption)
         self.request_hide.connect(self._on_hide)
+        self.request_transcript.connect(self._on_transcript)
+        self.request_quota.connect(lambda _: None)   # o HUD não exibe cota
 
         self._place()
 
@@ -152,11 +142,10 @@ class Overlay(QWidget):
             self._on_hide()
             return
 
-        first_show = self._state is UiState.HIDDEN
+        if self._state is UiState.HIDDEN:
+            self._subtitle = ""
         self._state = state
         self._caption = caption_for(state)
-        if first_show:
-            self._subtitle = ""
 
         self._target_open = 1.0
         if not self.isVisible():
@@ -173,6 +162,11 @@ class Overlay(QWidget):
         self._subtitle = cleaned if len(cleaned) <= 90 else cleaned[:87] + "..."
         self.update()
 
+    def _on_transcript(self, who: str, text: str) -> None:
+        # Sem espaço para histórico: o HUD mostra apenas a última fala.
+        if who in ("james", "sistema"):
+            self._on_caption(text)
+
     def _on_hide(self) -> None:
         if self._state is UiState.HIDDEN and not self.isVisible():
             return
@@ -182,12 +176,15 @@ class Overlay(QWidget):
             self._last_tick = self._clock.elapsed() / 1000.0
             self._timer.start()
 
+    def set_listening(self, listening: bool) -> None:
+        """Presente para casar a interface com a da janela comum."""
+
     # ------------------------------------------------------------ animação
 
     def _tick(self) -> None:
         now = self._clock.elapsed() / 1000.0
-        # Delta real do relógio, não um passo fixo: assumir 60 fps faz o
-        # piscar sair em ritmo errado numa máquina mais lenta.
+        # Delta real do relógio, não um passo fixo: assumir 60 quadros por
+        # segundo faz o piscar sair em ritmo errado numa máquina mais lenta.
         delta = max(0.0, min(0.25, now - self._last_tick))
         self._last_tick = now
 
@@ -219,7 +216,7 @@ class Overlay(QWidget):
         palette = palette_for(self._state, self._degraded)
         elapsed = self._clock.elapsed() / 1000.0
         opening = self._target_open > 0.0
-        amount = _ease_out(self._open_amount) if opening else _ease_in(self._open_amount)
+        amount = ease_out(self._open_amount) if opening else ease_in(self._open_amount)
 
         if amount > 0.02:
             painter.save()
@@ -235,66 +232,32 @@ class Overlay(QWidget):
         if self._open_amount < _LINE_THRESHOLD:
             self._draw_collapse_line(painter, rect, palette)
 
-        self._draw_scanlines(painter, rect)
-        self._draw_vignette(painter, rect)
+        draw_scanlines(painter, rect)
+        draw_vignette(painter, rect)
 
     def _draw_panel(self, painter, rect, palette, elapsed, amount) -> None:
-        # --- fundo do painel, com cantos angulares ---
         background = QColor(*palette.background)
         background.setAlpha(int(190 * amount))
         painter.setBrush(background)
         painter.setPen(Qt.NoPen)
-        painter.drawPath(_angular_path(rect.adjusted(2, 2, -2, -2), 14))
+        painter.drawPath(angular_path(rect.adjusted(2, 2, -2, -2), 14))
 
         border = QColor(*palette.glow)
         border.setAlpha(int(150 * amount))
         painter.setBrush(Qt.NoBrush)
         painter.setPen(QPen(border, 1.4))
-        painter.drawPath(_angular_path(rect.adjusted(2, 2, -2, -2), 14))
+        painter.drawPath(angular_path(rect.adjusted(2, 2, -2, -2), 14))
 
-        # --- orbe ---
         orb_radius = rect.width() * 0.19
         orb_center = QPointF(rect.center().x(), rect.top() + rect.height() * 0.40)
-        intensity = _pulse(elapsed, PULSE_RATE.get(self._state, 1.0))
+        intensity = pulse(elapsed, PULSE_RATE.get(self._state, 1.0))
         flicker = 0.94 + 0.06 * math.sin(self._flicker)
 
-        halo_radius = orb_radius * (1.9 + 0.55 * intensity)
-        gradient = QRadialGradient(orb_center, halo_radius)
-        core = QColor(*palette.core)
-        core.setAlpha(int((215 * (0.55 + 0.45 * intensity)) * amount * flicker))
-        mid = QColor(*palette.glow)
-        mid.setAlpha(int(110 * amount * intensity))
-        edge = QColor(*palette.glow)
-        edge.setAlpha(0)
-        gradient.setColorAt(0.0, core)
-        gradient.setColorAt(0.42, mid)
-        gradient.setColorAt(1.0, edge)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(gradient)
-        painter.drawEllipse(orb_center, halo_radius, halo_radius)
+        draw_orb(painter, orb_center, orb_radius, palette, intensity, amount, flicker)
 
-        # Núcleo sólido, que dá o "ponto de luz" no centro do halo.
-        solid = QColor(*palette.core)
-        solid.setAlpha(int(235 * amount * flicker))
-        painter.setBrush(solid)
-        painter.drawEllipse(orb_center, orb_radius * 0.42, orb_radius * 0.42)
-
-        # --- anel de varredura, só quando há trabalho acontecendo ---
         if self._state in (UiState.THINKING, UiState.EXECUTING):
-            ring = QColor(*palette.core)
-            ring.setAlpha(int(200 * amount))
-            painter.setBrush(Qt.NoBrush)
-            painter.setPen(QPen(ring, 2.0, Qt.SolidLine, Qt.RoundCap))
-            box = QRectF(
-                orb_center.x() - orb_radius * 1.55,
-                orb_center.y() - orb_radius * 1.55,
-                orb_radius * 3.1,
-                orb_radius * 3.1,
-            )
-            start_angle = int((-elapsed * 210) % 360) * 16
-            painter.drawArc(box, start_angle, 110 * 16)
+            draw_scan_ring(painter, orb_center, orb_radius, palette, elapsed, amount)
 
-        # --- textos ---
         text_color = QColor(*palette.text)
         text_color.setAlpha(int(235 * amount))
         painter.setPen(text_color)
@@ -356,37 +319,3 @@ class Overlay(QWidget):
         painter.drawEllipse(
             QPointF(rect.center().x(), center_y), rect.width() * 0.22, rect.height() * 0.09
         )
-
-    def _draw_scanlines(self, painter, rect) -> None:
-        """Linhas horizontais de tubo. Custo desprezível, efeito grande."""
-        line = QColor(0, 0, 0, 46)
-        painter.setPen(QPen(line, 1.0))
-        y = rect.top()
-        while y < rect.bottom():
-            painter.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
-            y += 3.0
-
-    def _draw_vignette(self, painter, rect) -> None:
-        gradient = QRadialGradient(rect.center(), max(rect.width(), rect.height()) * 0.62)
-        gradient.setColorAt(0.55, QColor(0, 0, 0, 0))
-        gradient.setColorAt(1.0, QColor(0, 0, 0, 120))
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(gradient)
-        painter.drawRect(rect)
-
-
-def _angular_path(rect: QRectF, cut: float) -> QPainterPath:
-    """Retângulo com cantos chanfrados — a silhueta angular do HUD."""
-    path = QPainterPath()
-    left, top, right, bottom = rect.left(), rect.top(), rect.right(), rect.bottom()
-    cut = min(cut, rect.width() / 3.0, rect.height() / 3.0)
-    path.moveTo(left + cut, top)
-    path.lineTo(right - cut, top)
-    path.lineTo(right, top + cut)
-    path.lineTo(right, bottom - cut)
-    path.lineTo(right - cut, bottom)
-    path.lineTo(left + cut, bottom)
-    path.lineTo(left, bottom - cut)
-    path.lineTo(left, top + cut)
-    path.closeSubpath()
-    return path

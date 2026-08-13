@@ -64,6 +64,17 @@ class Tool:
 class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, Tool] = {}
+        # Dependências injetadas depois da construção: as ferramentas de visão
+        # precisam do cliente de LLM e da captura de tela, que só existem
+        # quando o orquestrador e a interface Qt já subiram.
+        self.llm = None
+        self.screen_grabber = None
+
+    def attach_llm(self, client) -> None:
+        self.llm = client
+
+    def attach_screen_grabber(self, grabber) -> None:
+        self.screen_grabber = grabber
 
     def register(self, tool: Tool) -> None:
         if tool.handler is None:

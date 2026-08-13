@@ -232,3 +232,42 @@ def test_whitelist_vazia_bloqueia_tudo():
 
     empty = Guard(Config({"permissions": {"apps": {}}}))
     assert empty.evaluate("abrir_app", {"nome": "chrome"}).decision is Decision.BLOCK
+
+
+# ------------------------------------------------------------- visão
+
+def test_ver_tela_exige_confirmacao_por_padrao(guard):
+    """A tela pode ter senha e banco, e a captura sai da máquina."""
+    verdict = guard.evaluate("ver_tela", {"pergunta": "o que tem aqui?"})
+    assert verdict.decision is Decision.CONFIRM
+    assert verdict.spoken
+
+
+def test_ver_camera_exige_confirmacao_por_padrao(guard):
+    assert guard.evaluate("ver_camera", {}).decision is Decision.CONFIRM
+
+
+def test_visao_pode_ser_baixada_para_nivel_1_no_config(config_data):
+    """Configurável, mas é uma troca consciente de privacidade por conveniência."""
+    from james.config import Config
+
+    config_data["permissions"]["vision_requires_confirmation"] = False
+    relaxado = Guard(Config(config_data))
+    assert relaxado.evaluate("ver_tela", {}).decision is Decision.ALLOW
+    assert relaxado.evaluate("ver_camera", {}).decision is Decision.ALLOW
+
+
+# ------------------------------------------------------------ memória
+
+@pytest.mark.parametrize(
+    "tool,args",
+    [
+        ("lembrar", {"texto": "prefere respostas curtas"}),
+        ("esquecer", {"trecho": "café"}),
+        ("atualizar_memoria", {"trecho_antigo": "a", "texto_novo": "b"}),
+        ("consultar_memoria", {"busca": "café"}),
+    ],
+)
+def test_memoria_e_nivel_1(guard, tool, args):
+    """Nota pessoal não é ação no sistema: pedir permissão viraria interrogatório."""
+    assert guard.evaluate(tool, args).decision is Decision.ALLOW
