@@ -88,6 +88,11 @@ class Guard:
             "esquecer": self._rule_sem_risco,
             "atualizar_memoria": self._rule_sem_risco,
             "consultar_memoria": self._rule_sem_risco,
+            "briefing_do_dia": self._rule_sem_risco,
+            # --- criação de documento: escreve arquivo NOVO na whitelist,
+            #     sem sobrescrever nada, então não é irreversível ---
+            "criar_apresentacao": self._rule_criar_documento,
+            "criar_planilha": self._rule_criar_documento,
             # --- arquivos ---
             "listar_arquivos": self._rule_listar_arquivos,
             "organizar_arquivos": self._rule_organizar_arquivos,
@@ -310,6 +315,30 @@ class Guard:
                 f"Vou renomear {caminho.name} para {novo_nome}. Confirma, {self.treatment}?"
             ),
             args={"caminho": str(caminho), "novo_nome": novo_nome},
+        )
+
+    def _rule_criar_documento(self, args: dict[str, Any]) -> GuardVerdict:
+        """Criar um arquivo novo é reversível: nada existente é tocado.
+
+        A tool grava apenas dentro da whitelist e nunca sobrescreve — o destino
+        ganha sufixo se já existir. Por isso é Nível 1, ao contrário de mover e
+        renomear, que mexem em arquivos que já existem.
+        """
+        titulo = strip_dangerous_chars(str(args.get("titulo", "") or "")).strip()
+        if not titulo:
+            return self._block("criar_documento", "título vazio", "Qual o título, {t}?")
+        if not self.path_guard.enabled:
+            return self._block(
+                "criar_documento",
+                "nenhuma pasta permitida configurada",
+                "Não tenho uma pasta onde possa salvar arquivos, {t}.",
+            )
+        return GuardVerdict(
+            tool="criar_documento",
+            decision=Decision.ALLOW,
+            reason="cria arquivo novo dentro da whitelist, sem sobrescrever",
+            spoken="",
+            args=dict(args),
         )
 
     # ----------------------------------------------------------- visão

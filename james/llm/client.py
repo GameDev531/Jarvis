@@ -158,6 +158,9 @@ class LLMClient:
                 max_output_tokens=int(
                     self.config.get("llm.openrouter.max_output_tokens", 1200)
                 ),
+                vision_models=list(
+                    self.config.get("llm.openrouter.vision_models", []) or []
+                ),
             )
         except ProviderError as exc:
             logger.error("OpenRouter indisponível: %s", exc)

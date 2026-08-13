@@ -12,14 +12,16 @@ from james.tools.registry import Tool, ToolRegistry, ToolResult
 
 def build_registry(config, guard, memory=None) -> ToolRegistry:
     """Monta o catálogo completo. Cada módulo registra as suas."""
-    from james.tools import apps, files, system, vision, web
+    from james.tools import apps, briefing, files, office, system, vision, web
 
     registry = ToolRegistry()
     apps.register(registry, config, guard)
     web.register(registry, config, guard)
     system.register(registry, config, guard)
     files.register(registry, config, guard)
+    office.register(registry, config, guard)
     vision.register(registry, config, guard)
+    briefing.register(registry, config, guard, memory)
 
     if memory is not None:
         from james.tools import memory as memory_tools

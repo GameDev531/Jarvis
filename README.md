@@ -4,7 +4,8 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 6 implementadas. 388 testes automatizados.
+**Estado atual:** Fases 0 a 7 implementadas. 428 testes automatizados.
+O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
 
@@ -17,7 +18,7 @@ na prática dobra o uso diário possível.
 |---|---|---|
 | **Percepção** | Gemini | Ouve o áudio e transcreve |
 | **Raciocínio** | OpenRouter | Decide, planeja, escreve, chama ferramentas |
-| **Visão** | Gemini | Analisa tela e câmera |
+| **Visão** | Gemini, OpenRouter | Analisa tela e câmera |
 
 O fluxo tem um efeito colateral valioso: como a transcrição chega **antes** do
 raciocínio, o roteador local pode interceptar comandos frequentes e resolvê-los
@@ -42,7 +43,8 @@ Cada papel tem uma **cadeia**, não um provedor fixo (`llm.roles` no
 python -m venv .venv
 .venv\Scripts\activate
 pip install -e ".[dev]"
-pip install opencv-python      # opcional, só para análise de câmera
+pip install -e ".[office]"     # opcional: PowerPoint e Excel
+pip install -e ".[camera]"     # opcional: análise de câmera
 ```
 
 ### 2. Chaves de API
@@ -251,6 +253,8 @@ campo de renomeação; e argumentos do modelo com `"risco": "baixo"` ou
 | `organizar_arquivos`, `mover_arquivo`, `renomear_arquivo` | 2 | Nada é sobrescrito nem apagado |
 | `fechar_app` | 2 | Sem `/F`: o programa ainda pergunta se quer salvar |
 | `ver_tela`, `ver_camera` | 2 | A imagem sai da máquina para ser analisada |
+| `criar_apresentacao`, `criar_planilha` | 1 | Arquivo novo na whitelist, nunca sobrescreve |
+| `briefing_do_dia` | 1 | Hora, clima (wttr.in), máquina e lembretes da memória |
 
 `ver_tela` e `ver_camera` nascem no Nível 2 de propósito: a tela pode ter senha
 e extrato bancário, e a câmera é a sua imagem. Configurável em
@@ -341,6 +345,8 @@ python -m pytest tests/ -q          # 388 testes
 | `test_sentences.py` | Divisão em pt-BR e streaming |
 | `test_rate_limiter.py` | Janelas, virada de dia, persistência |
 | `test_router.py` | Casamento local e recusa conservadora |
+| `test_office.py` | Geração real de .pptx e .xlsx, conversão de números |
+| `test_briefing.py` | Montagem do resumo, clima ausente, lembretes |
 | `test_hotkey.py` | Interpretação do atalho |
 
 ---
@@ -363,7 +369,7 @@ james/
   memory/             memória curada em markdown
   permissions/        guard, caminhos, confirmação determinística
   security/           sanitizador de conteúdo externo, PIN
-  tools/              registro + apps, web, sistema, arquivos, visão, memória
+  tools/              apps, web, sistema, arquivos, visão, memória, office, briefing
   ui/                 janela, HUD, orbe, bandeja, captura, diálogo
   state/              IPC, estado persistente
   hotkey/             kill switch global
@@ -382,11 +388,10 @@ james/
 - [x] **Fase 4** — memória curada
 - [x] **Fase 5** — arquivos com whitelist, análise de tela e câmera
 - [x] **Fase 6** — PIN e confirmação por janela
-- [ ] **Fase 7** — wake word "James" própria (openWakeWord)
-- [ ] Ferramentas maiores: PowerPoint, planilhas, automação sequencial,
-      múltiplos agentes, pesquisa aprofundada, ferramenta de investidor,
-      celular, casa inteligente, gestos, construtor de sites
-- [ ] Adiados: nós remotos, provedor de skills, mensagens
+- [x] **Fase 7** — PowerPoint, Excel com gráfico, briefing do dia
+- [ ] **Fase 8** — automação sequencial com encadeamento de resultados
+- [ ] **Fase 9** — wake word "James" própria (openWakeWord)
+- [ ] Backlog de ferramentas maiores: ver [PLANO.md](PLANO.md)
 
 O login por reconhecimento facial foi **retirado do escopo**: o MediaPipe
 `tasks-vision` faz detecção e landmarks de rosto, mas não produz embedding de

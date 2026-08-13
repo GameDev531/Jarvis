@@ -11,12 +11,15 @@ dia com US$ 10 vitalícios, e 20 por minuto em qualquer caso. A lista de modelos
 protege contra o 429 momentâneo de um modelo específico; ela NÃO multiplica a
 cota diária.
 
-Limitação real: estes modelos recebem texto, não áudio nem imagem. Quem cuida
-disso é o Gemini, nos papéis de percepção e visão.
+Sobre imagem: parte do catálogo `:free` enxerga imagem, e esses modelos ficam
+em `vision_models` — o que permite à visão ter um segundo caminho em vez de
+depender só do Gemini. Áudio, não: a percepção continua sendo do Gemini, e o
+comando falado precisa passar por ela antes de chegar aqui.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import time
 from typing import Any, Iterator
@@ -41,7 +44,10 @@ _DONE = "[DONE]"
 class OpenRouterProvider:
     name = "openrouter"
     accepts_audio = False
-    accepts_image = False
+    # Aceita imagem quando há modelos de visão configurados. Vários modelos
+    # `:free` do catálogo enxergam imagem — o que torna a visão resiliente em
+    # vez de depender só do Gemini.
+    accepts_image = True
 
     def __init__(
         self,
@@ -52,6 +58,7 @@ class OpenRouterProvider:
         cooldown_s: int = 60,
         temperature: float = 0.7,
         max_output_tokens: int = 1200,
+        vision_models: list[str] | None = None,
     ) -> None:
         if not api_key:
             raise ProviderError("OPENROUTER_API_KEY ausente.")
@@ -70,17 +77,21 @@ class OpenRouterProvider:
         self.cooldown_s = int(cooldown_s)
         self.temperature = float(temperature)
         self.max_output_tokens = int(max_output_tokens)
+        self.vision_models = list(vision_models or [])
         # modelo -> instante (monotônico) em que sai do resfriamento
         self._cooldown: dict[str, float] = {}
 
     # --------------------------------------------------------------- seleção
 
-    def _available_models(self) -> list[str]:
+    def _available_from(self, models: list[str]) -> list[str]:
         now = time.monotonic()
-        ready = [model for model in self.models if self._cooldown.get(model, 0.0) <= now]
+        ready = [model for model in models if self._cooldown.get(model, 0.0) <= now]
         # Se todos estão em resfriamento, tentar o menos recente é melhor que
         # desistir sem tentar: o provedor pode ter liberado antes do previsto.
-        return ready or sorted(self.models, key=lambda m: self._cooldown.get(m, 0.0))
+        return ready or sorted(models, key=lambda m: self._cooldown.get(m, 0.0))
+
+    def _available_models(self) -> list[str]:
+        return self._available_from(self.models)
 
     def _mark_cooldown(self, model: str) -> None:
         self._cooldown[model] = time.monotonic() + self.cooldown_s
@@ -127,6 +138,68 @@ class OpenRouterProvider:
 
         raise QuotaExceeded(
             f"Nenhum modelo do OpenRouter respondeu. Último erro: {last_error}"
+        )
+
+    def generate_with_image(
+        self,
+        conversation: Conversation,
+        image: bytes,
+        mime_type: str = "image/png",
+        text: str = "Descreva o que aparece nesta imagem.",
+        instruction: str | None = None,
+        tools: list[ToolSchema] | None = None,
+        on_text: TextCallback | None = None,
+    ) -> LLMResponse:
+        """Papel de VISÃO pelo OpenRouter.
+
+        A imagem viaja embutida como data URL, no formato multimodal da API de
+        chat. Só os modelos listados em `vision_models` enxergam imagem: mandar
+        para um modelo de texto devolve erro ou, pior, uma alucinação sobre uma
+        imagem que ele não viu.
+        """
+        if not image:
+            raise ProviderError("Nenhuma imagem para analisar.")
+        if not self.vision_models:
+            raise ProviderError(
+                "Nenhum modelo de visão configurado em llm.openrouter.vision_models."
+            )
+
+        data_url = f"data:{mime_type};base64,{base64.b64encode(image).decode('ascii')}"
+        mensagens: list[dict[str, Any]] = []
+        if self.system_prompt:
+            mensagens.append({"role": "system", "content": self.system_prompt})
+        if instruction:
+            mensagens.append({"role": "system", "content": instruction})
+        mensagens.append(
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": text},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            }
+        )
+
+        payload_base: dict[str, Any] = {
+            "messages": mensagens,
+            "temperature": self.temperature,
+            "max_tokens": self.max_output_tokens,
+            "stream": True,
+        }
+
+        last_error: Exception | None = None
+        for model in self._available_from(self.vision_models):
+            try:
+                return self._stream_one(dict(payload_base, model=model), model, on_text)
+            except QuotaExceeded as exc:
+                self._mark_cooldown(model)
+                last_error = exc
+            except ProviderError as exc:
+                logger.warning("Modelo de visão %s falhou: %s", model, exc)
+                last_error = exc
+
+        raise QuotaExceeded(
+            f"Nenhum modelo de visão do OpenRouter respondeu. Último erro: {last_error}"
         )
 
     def _stream_one(
