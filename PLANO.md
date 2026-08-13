@@ -20,10 +20,12 @@ descreve por que as coisas são como são e o que falta.
 | 7 — Documentos e briefing | ✅ | PowerPoint, Excel com gráfico, resumo do dia |
 | 8 — Automação sequencial | ✅ | Plano de até 8 passos com encadeamento `{{resultado}}` |
 | 9 — Análise de investimentos | ✅ | Dados de mercado + disciplina de investidor no prompt |
-| 10 — Wake word própria | ⬜ | Treino de "James" via openWakeWord |
-| 11 — Ferramentas maiores | ⬜ | Ver "Backlog" abaixo |
+| 10 — Memória profunda | ✅ | SQLite + FTS5, entidades, grau de confiança, contradições |
+| 11 — Habilidades | ✅ | `SKILL.md` local + instalação remota com fontes confiáveis |
+| 12 — Wake word própria | ⬜ | Treino de "James" via openWakeWord |
+| 13 — Ferramentas maiores | ⬜ | Ver "Backlog" abaixo |
 
-**507 testes automatizados.** Nada de Porcupine, Piper, whisper.cpp, Qt ou
+**575 testes automatizados.** Nada de Porcupine, Piper, whisper.cpp, Qt ou
 câmera foi executado em hardware real ainda — a Fase 0 existe para isso.
 
 ---
@@ -206,6 +208,79 @@ Agrupado por esforço real, não por ordem da lista original.
 - Free tiers mudam de regra sem aviso; o modo degradado existe para isso.
 - A latência depende da rede: dois provedores em sequência (percepção +
   raciocínio) significam dois ida-e-volta por turno.
+
+---
+
+## Fase 10 — Memória profunda (feita)
+
+`james/memory/fact_store.py`. Complementa a camada curada em vez de substituí-la:
+
+|  | Curada (`MEMORY.md`/`USER.md`) | Profunda (`fatos.db`) |
+|---|---|---|
+| Tamanho | Pouca coisa, alto sinal | Muita coisa |
+| Contexto | Sempre no prompt | Nunca no prompt; consultada sob demanda |
+| Limite | Caracteres, para caber no prompt | Número de fatos |
+| Edição | À mão, em markdown | Pelas ferramentas |
+
+**Sem vetores, de propósito.** O Hermes usa vetores HRR para uma operação de
+raciocínio composicional. É elegante e é bastante matemática para manter.
+Fatos, entidades, busca textual e grau de confiança cobrem a maior parte do
+valor prático — e SQLite com FTS5 já vem no Python, sem dependência nenhuma.
+
+**Decisões:**
+
+- Busca com `remove_diacritics 2` no tokenizador: em português, "cafe" achar
+  "café" não é conveniência, é requisito.
+- **Bug encontrado durante a implementação:** o `lower()` do SQLite é ASCII, e
+  `lower('LÉO')` devolve `'lÉo'`. A detecção de duplicata pelo texto original
+  deixava passar qualquer repetição com acento. Corrigido com uma coluna de
+  chave normalizada em Python, com migração para bancos já criados.
+- Grau de confiança: nasce em 0,5; confirmar aproxima de 1 assintoticamente
+  (certeza absoluta não existe), refutar corta pela metade. Duas refutações
+  tiram o fato da busca — mas **não o apagam**: refutar por engano não deveria
+  destruir a informação.
+- Fato repetido não vira lixo: é tratado como confirmação.
+- Contradições são **candidatos**, achados por entidade em comum e sobreposição
+  de termos entre 30% e 95%. Acima disso é repetição, abaixo é outro assunto.
+  Julgar se realmente se contradizem é do modelo: SQL não entende negação,
+  ironia nem mudança de contexto no tempo.
+- Termos da consulta são saneados: o FTS5 tem operadores próprios (`NEAR`, `*`,
+  `-`, `:`) e uma pergunta do usuário com esses caracteres geraria erro de
+  sintaxe — ou uma busca diferente da pedida.
+
+---
+
+## Fase 11 — Habilidades (feita)
+
+`james/skills/`. Instruções especializadas por assunto, em `skills/<nome>/SKILL.md`
+com cabeçalho de nome e descrição.
+
+**Por que vale mais aqui do que num assistente comum:** o papel de raciocínio
+roda em modelos gratuitos do OpenRouter. São bons, mas erram mais que um modelo
+de ponta — e dar a eles uma referência concreta reduz muito o "chute com
+confiança", que é o modo de falhar mais caro.
+
+**Só carrega o que foi pedido.** Injetar todas no prompt derrotaria o
+propósito. Só nome e descrição ficam visíveis; o conteúdo entra quando o modelo
+decide carregar.
+
+**Três travas na instalação remota**, porque baixar habilidade é baixar
+instruções de terceiros para o James seguir — mesmo risco de um pacote npm
+desconhecido:
+
+1. Nível 2 no guard, com a fonte dita em voz alta antes de aprovar;
+2. lista de fontes confiáveis no `config.yaml`, checada antes de qualquer
+   acesso à rede;
+3. saneamento na leitura — os invisíveis usados para esconder instrução saem
+   antes de o conteúdo chegar ao modelo.
+
+Vem com uma habilidade de exemplo (`planilhas`) que documenta o formato.
+
+**Risco que apareceu:** o catálogo chegou a 28 ferramentas. A própria pesquisa
+já avisava que descrições demais competindo por atenção fazem modelos rápidos
+errarem mais na escolha. A saída desenhada é dar a cada agente um recorte do
+catálogo em vez do catálogo inteiro — o que casa com o que já estava previsto
+para múltiplos agentes.
 
 ---
 

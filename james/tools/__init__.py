@@ -10,7 +10,7 @@ Ela volta quando os nós remotos entrarem.
 from james.tools.registry import Tool, ToolRegistry, ToolResult
 
 
-def build_registry(config, guard, memory=None) -> ToolRegistry:
+def build_registry(config, guard, memory=None, facts=None, skills=None) -> ToolRegistry:
     """Monta o catálogo completo. Cada módulo registra as suas."""
     from james.tools import apps, briefing, files, investing, office, sequence, system, vision, web
 
@@ -28,6 +28,16 @@ def build_registry(config, guard, memory=None) -> ToolRegistry:
         from james.tools import memory as memory_tools
 
         memory_tools.register(registry, config, guard, memory)
+
+    if facts is not None:
+        from james.tools import knowledge
+
+        knowledge.register_facts(registry, config, guard, facts)
+
+    if skills is not None:
+        from james.tools import knowledge
+
+        knowledge.register_skills(registry, config, guard, skills)
 
     # Por último: a sequência consulta o catálogo para validar os passos,
     # então precisa das outras já registradas.

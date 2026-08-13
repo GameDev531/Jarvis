@@ -144,6 +144,20 @@ memory:
   dir: memories
   max_chars: 4000            # limite POR ARQUIVO; força guardar só o essencial
 
+  # Camada 2: memória profunda em SQLite. Não entra no prompt sozinha — o James
+  # consulta quando precisa, então aqui não há limite de caracteres.
+  fatos_db: state/fatos.db
+  max_fatos: 5000
+
+skills:
+  # Instruções especializadas por assunto, carregadas sob demanda.
+  dir: skills
+  # Instalar habilidade remota é baixar instruções de terceiros. Só destas
+  # fontes, e sempre com confirmação.
+  fontes_confiaveis:
+    - anthropics/skills
+    - vercel-labs/agent-skills
+
 camera:
   device_index: 0            # 0 = webcam padrão
 

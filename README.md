@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 9 implementadas. 507 testes automatizados.
+**Estado atual:** Fases 0 a 11 implementadas. 575 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -257,6 +257,9 @@ campo de renomeação; e argumentos do modelo com `"risco": "baixo"` ou
 | `briefing_do_dia` | 1 | Hora, clima (wttr.in), máquina e lembretes da memória |
 | `executar_sequencia` | 1 | Coordena; a autoridade fica em cada passo |
 | `analisar_acao`, `comparar_acoes` | 1 | Dados de mercado — análise, não recomendação |
+| `registrar_fato`, `consultar_fatos`, `revisar_fato` | 1 | Memória profunda |
+| `habilidades` | 1 | Carrega instruções especializadas |
+| `instalar_habilidade` | 2 | Instruções de terceiros entrando no contexto |
 
 `ver_tela` e `ver_camera` nascem no Nível 2 de propósito: a tela pode ter senha
 e extrato bancário, e a câmera é a sua imagem. Configurável em
@@ -315,7 +318,29 @@ conseguiu os dados em vez de inventar número.
 
 ---
 
-## Memória
+## Memória — duas camadas
+
+|  | Curada | Profunda |
+|---|---|---|
+| Onde | `memories/*.md` | `state/fatos.db` |
+| Tamanho | Pouca coisa, alto sinal | Muita coisa |
+| Contexto | Sempre no prompt | Consultada sob demanda |
+| Edição | À mão, em markdown | Pelas ferramentas |
+
+A regra que o James segue: se a informação muda o jeito dele responder daqui em
+diante, é curada; se é algo que ele só precisa quando o assunto voltar, é
+profunda.
+
+A camada profunda tem entidades (quem/o quê o fato menciona), busca textual sem
+acento, e grau de confiança — confirmar aproxima de 1, refutar corta pela
+metade. Duas refutações tiram o fato da busca, mas **não o apagam**: refutar por
+engano não deveria destruir a informação.
+
+Ela também acha **candidatos a contradição** — fatos que dividem entidade e têm
+sobreposição de termos. Julgar se realmente se contradizem é do modelo: SQL não
+entende negação nem mudança de contexto no tempo.
+
+### Camada curada
 
 Dois arquivos markdown que você pode abrir e editar à mão:
 
@@ -334,6 +359,22 @@ Três decisões:
 3. **Instantâneo congelado.** Entra no prompt uma vez, no início da sessão. Uma
    escrita no meio da conversa vai para o arquivo na hora, mas só aparece na
    próxima — o contexto não muda sob os pés do modelo.
+
+---
+
+## Habilidades
+
+`skills/<nome>/SKILL.md` — instruções especializadas por assunto, carregadas só
+quando o modelo decide que precisa daquela referência. Só nome e descrição
+ficam visíveis; o conteúdo entra sob demanda.
+
+Vale mais aqui do que num assistente comum: o raciocínio roda em modelos
+gratuitos, que erram mais que um modelo de ponta. Uma referência concreta reduz
+muito o "chute com confiança".
+
+Instalar habilidade remota é Nível 2 e só de fontes em
+`skills.fontes_confiaveis` — é baixar instruções de terceiros para o James
+seguir, mesmo risco de um pacote npm desconhecido.
 
 ---
 
@@ -403,6 +444,8 @@ python -m pytest tests/ -q          # 388 testes
 | `test_plan.py` | Validação do plano e resolução de referências |
 | `test_executor.py` | Guard por passo, confirmação, interrupção |
 | `test_finance.py` | Métricas de mercado, tickers, resposta do provedor |
+| `test_fact_store.py` | Busca sem acento, confiança, contradições, persistência |
+| `test_skills.py` | Cabeçalho, busca, travas da instalação remota |
 | `test_hotkey.py` | Interpretação do atalho |
 
 ---
@@ -422,7 +465,8 @@ james/
   audio/              captura, VAD, reprodução, WAV
   voice/              Piper, whisper.cpp, divisão em sentenças, streaming
   llm/                cliente único, papéis, Gemini, OpenRouter, roteador, cota
-  memory/             memória curada em markdown
+  memory/             memória curada (markdown) e profunda (SQLite)
+  skills/             habilidades carregadas sob demanda
   permissions/        guard, caminhos, confirmação determinística
   security/           sanitizador de conteúdo externo, PIN
   agent/              plano de vários passos e execução encadeada
@@ -450,7 +494,9 @@ james/
 - [x] **Fase 7** — PowerPoint, Excel com gráfico, briefing do dia
 - [x] **Fase 8** — automação sequencial com encadeamento de resultados
 - [x] **Fase 9** — análise de investimentos
-- [ ] **Fase 10** — wake word "James" própria (openWakeWord)
+- [x] **Fase 10** — memória profunda (SQLite + FTS5)
+- [x] **Fase 11** — habilidades carregadas sob demanda
+- [ ] **Fase 12** — wake word "James" própria (openWakeWord)
 - [ ] Backlog de ferramentas maiores: ver [PLANO.md](PLANO.md)
 
 O login por reconhecimento facial foi **retirado do escopo**: o MediaPipe

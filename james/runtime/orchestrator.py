@@ -39,6 +39,8 @@ from james.llm.history import Conversation, ToolCall
 from james.llm.router import LocalRouter
 from james.logs import audit, get_logger, setup_logging
 from james.memory import MemoryStore
+from james.memory.fact_store import FactStore
+from james.skills import SkillRegistry
 from james.permissions.confirm import Confirmation, ConfirmationMatcher
 from james.permissions.guard import Decision, Guard
 from james.security.pin import PinStore
@@ -75,7 +77,15 @@ class Orchestrator:
             max_chars=int(config.get("memory.max_chars", 4000)),
         )
 
-        self.registry = build_registry(config, self.guard, self.memory)
+        self.facts = FactStore(
+            config.resolve_path("memory.fatos_db", "state/fatos.db"),
+            max_fatos=int(config.get("memory.max_fatos", 5000)),
+        )
+        self.skills = SkillRegistry(config.resolve_path("skills.dir", "skills"))
+
+        self.registry = build_registry(
+            config, self.guard, self.memory, facts=self.facts, skills=self.skills
+        )
         self.router = LocalRouter(
             self.guard.apps, enabled=bool(config.get("llm.local_router.enabled", True))
         )
@@ -265,6 +275,7 @@ class Orchestrator:
         if self.ipc is not None:
             self.ipc.send({"type": "bye"})
             self.ipc.stop()
+        self.facts.close()
         if self._worker is not None:
             self._worker.join(timeout=3.0)
 

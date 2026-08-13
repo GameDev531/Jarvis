@@ -88,6 +88,10 @@ class Guard:
             "esquecer": self._rule_sem_risco,
             "atualizar_memoria": self._rule_sem_risco,
             "consultar_memoria": self._rule_sem_risco,
+            "registrar_fato": self._rule_sem_risco,
+            "consultar_fatos": self._rule_sem_risco,
+            "revisar_fato": self._rule_sem_risco,
+            "habilidades": self._rule_sem_risco,
             "briefing_do_dia": self._rule_sem_risco,
             "analisar_acao": self._rule_sem_risco,
             "comparar_acoes": self._rule_sem_risco,
@@ -107,6 +111,7 @@ class Guard:
             "fechar_app": self._rule_fechar_app,
             "ver_tela": self._rule_ver_tela,
             "ver_camera": self._rule_ver_camera,
+            "instalar_habilidade": self._rule_instalar_habilidade,
         }
 
     # ------------------------------------------------------------ entrada
@@ -344,6 +349,32 @@ class Guard:
             reason="cria arquivo novo dentro da whitelist, sem sobrescrever",
             spoken="",
             args=dict(args),
+        )
+
+    def _rule_instalar_habilidade(self, args: dict[str, Any]) -> GuardVerdict:
+        """Baixar habilidade é baixar instruções de terceiros para seguir.
+
+        O risco é o de um pacote desconhecido: o conteúdo entra no contexto e
+        influencia decisões. Por isso Nível 2 com a fonte dita em voz alta — a
+        pessoa precisa ouvir DE ONDE está vindo antes de aprovar.
+        """
+        fonte = strip_dangerous_chars(str(args.get("fonte", "") or "")).strip()
+        nome = strip_dangerous_chars(str(args.get("nome", "") or "")).strip()
+        if not fonte or not nome:
+            return self._block(
+                "instalar_habilidade",
+                "fonte ou nome ausente",
+                "Preciso saber qual habilidade e de onde, {t}.",
+            )
+        return GuardVerdict(
+            tool="instalar_habilidade",
+            decision=Decision.CONFIRM,
+            reason=f"instala '{nome}' a partir de '{fonte}'",
+            spoken=(
+                f"Encontrei a habilidade {nome} no repositório {fonte}. "
+                f"É código de terceiros. Posso instalar, {self.treatment}?"
+            ),
+            args={"fonte": fonte, "nome": nome},
         )
 
     # ----------------------------------------------------------- visão
