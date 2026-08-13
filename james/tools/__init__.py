@@ -12,7 +12,9 @@ from james.tools.registry import Tool, ToolRegistry, ToolResult
 
 def build_registry(config, guard, memory=None, facts=None, skills=None) -> ToolRegistry:
     """Monta o catálogo completo. Cada módulo registra as suas."""
-    from james.tools import apps, briefing, files, investing, office, sequence, system, vision, web
+    from james.tools import (
+        apps, briefing, files, investing, office, research, sequence, system, vision, web,
+    )
 
     registry = ToolRegistry()
     apps.register(registry, config, guard)
@@ -23,6 +25,7 @@ def build_registry(config, guard, memory=None, facts=None, skills=None) -> ToolR
     vision.register(registry, config, guard)
     briefing.register(registry, config, guard, memory)
     investing.register(registry, config, guard)
+    research.register(registry, config, guard)
 
     if memory is not None:
         from james.tools import memory as memory_tools
@@ -39,9 +42,12 @@ def build_registry(config, guard, memory=None, facts=None, skills=None) -> ToolR
 
         knowledge.register_skills(registry, config, guard, skills)
 
-    # Por último: a sequência consulta o catálogo para validar os passos,
-    # então precisa das outras já registradas.
+    # Por último: sequência e delegação consultam o catálogo — a primeira
+    # para validar os passos, a segunda para montar os recortes por perfil.
+    from james.tools import delegation
+
     sequence.register(registry, config, guard)
+    delegation.register(registry, config, guard)
     return registry
 
 

@@ -73,6 +73,7 @@ class ToolRegistry:
         # relatar progresso; quem sabe fazer as duas coisas é o orquestrador.
         self.confirm_callback = None
         self.progress_callback = None
+        self.agent_progress_callback = None
 
     def attach_llm(self, client) -> None:
         self.llm = client
@@ -80,9 +81,10 @@ class ToolRegistry:
     def attach_screen_grabber(self, grabber) -> None:
         self.screen_grabber = grabber
 
-    def attach_callbacks(self, confirm=None, progress=None) -> None:
+    def attach_callbacks(self, confirm=None, progress=None, agent_progress=None) -> None:
         self.confirm_callback = confirm
         self.progress_callback = progress
+        self.agent_progress_callback = agent_progress
 
     def register(self, tool: Tool) -> None:
         if tool.handler is None:

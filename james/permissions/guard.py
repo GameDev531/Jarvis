@@ -79,6 +79,9 @@ class Guard:
             # --- baixo risco, executa direto ---
             "abrir_app": self._rule_abrir_app,
             "abrir_pagina": self._rule_abrir_pagina,
+            # Ler página é navegação: passa pela MESMA validação de URL que
+            # abrir uma — esquema, host interno e domínio bloqueado.
+            "ler_pagina": self._rule_ler_pagina,
             "pesquisar_web": self._rule_pesquisar_web,
             "ajustar_volume": self._rule_ajustar_volume,
             "que_horas_sao": self._rule_sem_risco,
@@ -98,6 +101,11 @@ class Guard:
             # Coordena outras ferramentas e não age sozinha: a autoridade
             # fica em cada passo, avaliado individualmente na execução.
             "executar_sequencia": self._rule_sem_risco,
+            # Mesma lógica: o especialista não ganha permissão nenhuma, cada
+            # ferramenta que ele chama é avaliada individualmente.
+            "delegar": self._rule_sem_risco,
+            "buscar_na_web": self._rule_sem_risco,
+            "pesquisa_aprofundada": self._rule_sem_risco,
             # --- criação de documento: escreve arquivo NOVO na whitelist,
             #     sem sobrescrever nada, então não é irreversível ---
             "criar_apresentacao": self._rule_criar_documento,
@@ -204,6 +212,9 @@ class Guard:
 
     def _rule_abrir_pagina(self, args: dict[str, Any]) -> GuardVerdict:
         return self._analyze_url("abrir_pagina", str(args.get("url", "") or ""))
+
+    def _rule_ler_pagina(self, args: dict[str, Any]) -> GuardVerdict:
+        return self._analyze_url("ler_pagina", str(args.get("url", "") or ""))
 
     def _rule_pesquisar_web(self, args: dict[str, Any]) -> GuardVerdict:
         raw_query = strip_dangerous_chars(str(args.get("query", "") or "")).strip()

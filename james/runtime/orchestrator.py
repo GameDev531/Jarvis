@@ -110,7 +110,9 @@ class Orchestrator:
         # A sequência confirma passos de risco e relata progresso pelos
         # mesmos caminhos que um turno normal usa.
         self.registry.attach_callbacks(
-            confirm=self._ask_confirmation, progress=self._progresso_do_plano
+            confirm=self._ask_confirmation,
+            progress=self._progresso_do_plano,
+            agent_progress=self._progresso_do_agente,
         )
 
         self.pin_store = PinStore(config.root / "state" / "pin.json")
@@ -719,6 +721,11 @@ class Orchestrator:
         """
         self._set_ui(UiState.EXECUTING)
         self._show_caption(f"Passo {indice} de {total}: {rotulo}")
+
+    def _progresso_do_agente(self, perfil: str, etapa: str) -> None:
+        """Mostra o especialista trabalhando, sem narrar em voz alta."""
+        self._set_ui(UiState.EXECUTING)
+        self._show_caption(f"Especialista {perfil}: {etapa}")
 
     def _show_caption(self, text: str) -> None:
         if self.interface is not None:

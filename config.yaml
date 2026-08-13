@@ -158,6 +158,21 @@ skills:
     - anthropics/skills
     - vercel-labs/agent-skills
 
+agentes:
+  # Especialistas com catálogo reduzido. Um agente que enxerga cinco
+  # ferramentas escolhe melhor que um generalista que enxerga trinta — e o
+  # material bruto que ele acumula morre com ele, sem poluir a conversa.
+  perfis:
+    pesquisador:
+      descricao: "Investiga assuntos na internet e sintetiza o que encontrou"
+      ferramentas: [buscar_na_web, ler_pagina, pesquisa_aprofundada, registrar_fato]
+    analista:
+      descricao: "Analisa dados de mercado e monta planilhas"
+      ferramentas: [analisar_acao, comparar_acoes, criar_planilha]
+    arquivista:
+      descricao: "Organiza arquivos e monta documentos"
+      ferramentas: [listar_arquivos, organizar_arquivos, mover_arquivo, renomear_arquivo, criar_apresentacao, criar_planilha]
+
 camera:
   device_index: 0            # 0 = webcam padrão
 

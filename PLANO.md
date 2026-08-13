@@ -22,10 +22,12 @@ descreve por que as coisas são como são e o que falta.
 | 9 — Análise de investimentos | ✅ | Dados de mercado + disciplina de investidor no prompt |
 | 10 — Memória profunda | ✅ | SQLite + FTS5, entidades, grau de confiança, contradições |
 | 11 — Habilidades | ✅ | `SKILL.md` local + instalação remota com fontes confiáveis |
-| 12 — Wake word própria | ⬜ | Treino de "James" via openWakeWord |
-| 13 — Ferramentas maiores | ⬜ | Ver "Backlog" abaixo |
+| 12 — Busca com conteúdo e pesquisa aprofundada | ✅ | Busca, leitura de página e investigação em rodadas |
+| 13 — Agentes especialistas | ✅ | Recorte de catálogo por perfil |
+| 14 — Wake word própria | ⬜ | Treino de "James" via openWakeWord |
+| 15 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
 
-**575 testes automatizados.** Nada de Porcupine, Piper, whisper.cpp, Qt ou
+**613 testes automatizados.** Nada de Porcupine, Piper, whisper.cpp, Qt ou
 câmera foi executado em hardware real ainda — a Fase 0 existe para isso.
 
 ---
@@ -284,6 +286,92 @@ para múltiplos agentes.
 
 ---
 
+## Fase 12 — Busca com conteúdo e pesquisa aprofundada (feita)
+
+`james/web/` e `james/tools/research.py`.
+
+A `pesquisar_web` que já existia abre uma aba para o usuário ler. As novas
+trazem o conteúdo para dentro, que é o que a pesquisa aprofundada precisa:
+
+- `buscar_na_web` — resultados com título, endereço e resumo;
+- `ler_pagina` — texto da página, passando pela **mesma validação de URL** que
+  abrir uma (esquema, endereço interno, domínio bloqueado);
+- `pesquisa_aprofundada` — várias rodadas: busca, abre as páginas relevantes, e
+  usa os termos mais frequentes do que leu para refinar a busca seguinte.
+
+**Custo de cota:** a pesquisa aprofundada abre até seis páginas e faz até três
+buscas, e **nada disso gasta requisição de LLM** — é tudo HTTP direto. O modelo
+entra uma vez, no fim, para sintetizar.
+
+Fonte: endpoint HTML do DuckDuckGo (gratuito, sem cadastro). É raspagem, e vai
+quebrar quando o layout mudar. O parser está separado da rede justamente para
+poder ser testado e consertado sem depender de conexão — e quando quebrar, a
+falha é explícita em vez de virar resposta inventada.
+
+A extração de HTML usa só a biblioteca padrão. Ficam de fora: `script` e
+`style` (código no contexto do modelo é ruído no melhor caso e instrução
+disfarçada no pior), e `nav`/`header`/`footer`/`aside` (repetem em toda página
+do site e afogariam o conteúdo).
+
+---
+
+## Fase 13 — Agentes especialistas (feita)
+
+`james/agent/team.py` e a ferramenta `delegar`.
+
+Resolve dois problemas de uma vez:
+
+**Atenção.** O catálogo chegou a 32 ferramentas, e o risco que eu mesmo
+registrei na fase anterior virou realidade. Um especialista que enxerga quatro
+ferramentas escolhe melhor que um generalista que enxerga trinta e duas. Os
+perfis vêm do `config.yaml`; hoje são três — pesquisador (4 ferramentas),
+analista (3) e arquivista (6).
+
+**Contexto.** Uma investigação longa enche o histórico de páginas inteiras.
+Rodando num agente separado, esse material morre com ele: o principal recebe só
+a conclusão.
+
+**O que NÃO muda:** cada ferramenta que um especialista chama passa pelo mesmo
+guard, com as mesmas regras e a mesma confirmação de Nível 2. Delegar muda
+*quem pede*, nunca *o que é permitido*. E há teste garantindo que uma
+ferramenta fora do recorte é recusada mesmo que o modelo invente o nome.
+
+Um especialista não pode delegar nem orquestrar sequência — senão um agente
+chamaria outro sem fim.
+
+---
+
+## O que falta, e por quê
+
+Registrado com sinceridade, incluindo o que eu decidi **não** fazer.
+
+**Pequeno, falta só fazer**
+- **Telegram (Mobile Connect)** — bot API por HTTP, mão dupla. Precisa do seu
+  token e chat id. É a ponte mais honesta para celular: não depende de
+  automação de interface, que quebra a cada atualização do app.
+- **Casa inteligente** — API REST local do Home Assistant. Só faz sentido se
+  você já tiver dispositivos e o Home Assistant rodando.
+- **Painéis dinâmicos na janela** — o modelo descreve uma tabela ou lista, e a
+  janela renderiza. Com widgets Qt, não HTML, para respeitar a restrição da
+  máquina. Ficou de fora desta rodada por tempo, não por decisão.
+
+**Grande de verdade**
+- **Construtor de sites e de apps** — gerar um projeto inteiro é um projeto à
+  parte, não uma ferramenta. Vale conversarmos sobre o escopo real antes.
+- **Nós remotos (`james-node`)** — só compensa com uma segunda máquina.
+- **Wake word "James" própria** — treinar openWakeWord exige gerar milhares de
+  amostras sintéticas. É um mini-projeto; "Jarvis" segura a identidade até lá.
+
+**Decidi não fazer, e o motivo**
+- **Gestos por webcam.** É o pior custo-benefício da lista para esta máquina
+  específica: exige rastreamento de mão rodando o tempo todo, consumindo CPU
+  continuamente na máquina que já é o gargalo do projeto — a mesma que travou
+  com o overlay sobreposto. E o que ele destrava (mutar som, trocar aba) já
+  está a uma frase de distância pela voz. Se você quiser mesmo assim, eu faço:
+  é sua decisão, e a Fase 0 na sua máquina dá o número real de folga de CPU.
+
+---
+
 ## Lista de ferramentas pedidas — estado
 
 | Pedida | Estado | Observação |
@@ -301,7 +389,7 @@ para múltiplos agentes.
 | ✋ Gestos | ⬜ | Custa CPU continuamente; avaliar depois da Fase 0 real |
 | 🌐 Construtor de sites | ⬜ | Escopo grande |
 | 📱 Construtor de apps | ⬜ | Escopo grande |
-| 🤖 Múltiplos agentes | ⬜ | Base pronta (Fase 8) |
-| 🔍 Pesquisa aprofundada | ⬜ | Falta busca que devolva conteúdo |
+| 🤖 Múltiplos agentes | ✅ | Fase 13, com recorte de catálogo |
+| 🔍 Pesquisa aprofundada | ✅ | Fase 12, sem gastar cota nas rodadas |
 
-8 de 15 entregues.
+**10 de 15 entregues.** As cinco restantes e o motivo estão em "O que falta".

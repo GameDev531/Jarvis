@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 11 implementadas. 575 testes automatizados.
+**Estado atual:** Fases 0 a 13 implementadas. 613 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -259,6 +259,8 @@ campo de renomeação; e argumentos do modelo com `"risco": "baixo"` ou
 | `analisar_acao`, `comparar_acoes` | 1 | Dados de mercado — análise, não recomendação |
 | `registrar_fato`, `consultar_fatos`, `revisar_fato` | 1 | Memória profunda |
 | `habilidades` | 1 | Carrega instruções especializadas |
+| `buscar_na_web`, `ler_pagina`, `pesquisa_aprofundada` | 1 | Trazem conteúdo para dentro |
+| `delegar` | 1 | Aciona especialista; cada passo dele passa pelo guard |
 | `instalar_habilidade` | 2 | Instruções de terceiros entrando no contexto |
 
 `ver_tela` e `ver_camera` nascem no Nível 2 de propósito: a tela pode ter senha
@@ -378,6 +380,30 @@ seguir, mesmo risco de um pacote npm desconhecido.
 
 ---
 
+## Agentes especialistas
+
+O catálogo chegou a 32 ferramentas, e descrições demais competindo por atenção
+fazem o modelo errar mais na escolha. A ferramenta `delegar` entrega uma tarefa
+a um perfil que enxerga **só as ferramentas do seu recorte**:
+
+```yaml
+agentes:
+  perfis:
+    pesquisador:
+      ferramentas: [buscar_na_web, ler_pagina, pesquisa_aprofundada, registrar_fato]
+```
+
+Ganha-se também contexto: uma investigação longa enche o histórico de páginas
+inteiras, e rodando num agente separado esse material morre com ele — o
+principal recebe só a conclusão.
+
+**Delegar não afrouxa nada.** Cada ferramenta que o especialista chama passa
+pelo mesmo guard, com a mesma confirmação de Nível 2. Muda quem pede, nunca o
+que é permitido — e uma ferramenta fora do recorte é recusada mesmo que o
+modelo invente o nome.
+
+---
+
 ## Economia de requisições
 
 Uma rodada de tool calling custa 2 requisições por necessidade estrutural: o
@@ -446,6 +472,8 @@ python -m pytest tests/ -q          # 388 testes
 | `test_finance.py` | Métricas de mercado, tickers, resposta do provedor |
 | `test_fact_store.py` | Busca sem acento, confiança, contradições, persistência |
 | `test_skills.py` | Cabeçalho, busca, travas da instalação remota |
+| `test_web.py` | Extração de HTML e leitura de resultados de busca |
+| `test_team.py` | Recorte de catálogo, guard inalterado, teto de iterações |
 | `test_hotkey.py` | Interpretação do atalho |
 
 ---
@@ -469,7 +497,8 @@ james/
   skills/             habilidades carregadas sob demanda
   permissions/        guard, caminhos, confirmação determinística
   security/           sanitizador de conteúdo externo, PIN
-  agent/              plano de vários passos e execução encadeada
+  agent/              plano de vários passos, execução encadeada, especialistas
+  web/                busca e extração de texto de páginas
   finance/            métricas de mercado (matemática pura) e cotações
   tools/              apps, web, sistema, arquivos, visão, memória, office,
                       briefing, sequência, investimentos
@@ -496,7 +525,9 @@ james/
 - [x] **Fase 9** — análise de investimentos
 - [x] **Fase 10** — memória profunda (SQLite + FTS5)
 - [x] **Fase 11** — habilidades carregadas sob demanda
-- [ ] **Fase 12** — wake word "James" própria (openWakeWord)
+- [x] **Fase 12** — busca com conteúdo e pesquisa aprofundada
+- [x] **Fase 13** — agentes especialistas com recorte de catálogo
+- [ ] **Fase 14** — wake word "James" própria (openWakeWord)
 - [ ] Backlog de ferramentas maiores: ver [PLANO.md](PLANO.md)
 
 O login por reconhecimento facial foi **retirado do escopo**: o MediaPipe
