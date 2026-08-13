@@ -18,11 +18,12 @@ descreve por que as coisas são como são e o que falta.
 | 5 — Arquivos e visão | ✅ | Organizar/mover/renomear com whitelist, análise de tela e câmera |
 | 6 — PIN | ✅ | scrypt com sal, diálogo de confirmação, resolve a dependência do STT |
 | 7 — Documentos e briefing | ✅ | PowerPoint, Excel com gráfico, resumo do dia |
-| 8 — Automação sequencial | ⬜ | Fila de tarefas, encadeamento com resultados |
-| 9 — Wake word própria | ⬜ | Treino de "James" via openWakeWord |
-| 10 — Ferramentas maiores | ⬜ | Ver "Backlog" abaixo |
+| 8 — Automação sequencial | ✅ | Plano de até 8 passos com encadeamento `{{resultado}}` |
+| 9 — Análise de investimentos | ✅ | Dados de mercado + disciplina de investidor no prompt |
+| 10 — Wake word própria | ⬜ | Treino de "James" via openWakeWord |
+| 11 — Ferramentas maiores | ⬜ | Ver "Backlog" abaixo |
 
-**428 testes automatizados.** Nada de Porcupine, Piper, whisper.cpp, Qt ou
+**507 testes automatizados.** Nada de Porcupine, Piper, whisper.cpp, Qt ou
 câmera foi executado em hardware real ainda — a Fase 0 existe para isso.
 
 ---
@@ -105,36 +106,69 @@ copiar.
 
 ---
 
-## Fase 8 — Automação sequencial (próxima)
+## Fase 8 — Automação sequencial (feita)
 
-O que falta para "faça X, depois Y com o resultado".
+`james/agent/plan.py` e `james/agent/executor.py`, expostos ao modelo pela
+ferramenta `executar_sequencia`.
 
-**Problema a resolver.** Hoje o James executa as tools que o modelo pede num
-turno, com teto de iterações, mas não há como um passo consumir a saída do
-anterior nem retomar uma tarefa longa depois de reiniciar.
+O modelo emite o plano inteiro como argumento — uma requisição — e a execução
+acontece em Python. Um passo guarda seu resultado sob um nome (`salvar_como`) e
+passos seguintes o referenciam com `{{nome}}` ou `{{nome.campo}}`.
 
-**Desenho proposto:**
+**Decisões implementadas:**
 
-```
-james/agent/
-  plan.py       Plano = lista ordenada de passos, cada um com
-                {tool, args, guarda_resultado_como, usa_resultado_de}
-  executor.py   Executa passo a passo. Cada passo passa pelo guard,
-                igual a qualquer chamada. Resultado vai para um
-                escopo nomeado que o próximo passo pode referenciar.
-  queue.py      Fila persistida em disco: sobrevive a reinício do
-                orquestrador (o watchdog já reinicia o processo 2).
-```
+- A substituição de referências acontece em **Python**, antes do guard. Se o
+  modelo fizesse a substituição, poderia injetar qualquer caminho ou URL no
+  lugar, contornando a validação sobre argumentos resolvidos.
+- O guard avalia cada passo **no momento em que ele roda**. Aprovar o plano
+  inteiro de antemão seria aprovar um caminho que ainda não existia.
+- Confirmação de Nível 2 por passo: um plano de três passos com um arriscado
+  pergunta uma vez, no terceiro.
+- Referência a passo posterior é recusada na validação, não em runtime — falhar
+  cedo é melhor que falhar com passos já executados.
+- Referência que não resolve levanta erro em vez de virar literal: deixar
+  `{{arquivo}}` passar como texto acabaria virando um caminho absurdo.
+- `{{x}}` sozinho preserva o tipo (lista continua lista); no meio de um texto,
+  vira texto.
+- Navegação só por chave de dicionário e índice de lista, nunca por atributo de
+  objeto — senão o texto do modelo alcançaria o interior das estruturas.
+- Um passo não pode chamar `executar_sequencia` (recursão), e o teto é 8 passos.
+- Falha, bloqueio ou cancelamento interrompem o plano: continuar rodaria os
+  passos seguintes sobre um resultado que não existe.
 
-**Decisões já tomadas:**
+**Não incluído:** fila persistida em disco. Uma tarefa longa que sobrevive ao
+reinício do orquestrador é outro problema, e nada hoje a dispara.
 
-- Encadeamento por referência nomeada (`{{passo1.arquivo}}`), resolvida em
-  Python antes do guard — nunca pelo modelo, que não pode injetar caminho.
-- O guard avalia cada passo **no momento da execução**, com os argumentos já
-  resolvidos. Aprovar um plano inteiro de antemão deixaria a substituição de
-  variáveis fora da validação.
-- Confirmação de Nível 2 acontece por passo, não uma vez pelo plano todo.
-- Teto de passos e teto de replanejamento, como já existe para tools.
+---
+
+## Fase 9 — Análise de investimentos (feita)
+
+Feita depois da ressalva registrada na versão anterior deste plano, e da
+decisão consciente de seguir com ela.
+
+**A divisão que faz a ferramenta ser honesta:**
+
+    o código entrega FATOS calculáveis  →  o modelo faz a LEITURA
+
+`james/finance/metrics.py` calcula retorno por período, volatilidade
+anualizada, queda máxima, distância do topo, posição frente às médias móveis e
+volume relativo. Nenhuma linha de código opina — há inclusive um teste que
+verifica que as descrições de tendência não contêm "compre", "venda", "barato",
+"caro" ou "oportunidade".
+
+A leitura fica com o modelo, sob a seção INVESTIMENTOS do prompt do sistema,
+que codifica o que separa quem acompanha mercado há décadas de um iniciante:
+não prever preço, perguntar o horizonte antes de tudo, não tratar um número
+isolado como tese, falar do que pode dar errado com o mesmo cuidado, distinguir
+volatilidade (oscilação) de risco (perda permanente), separar a empresa do preço
+da ação, e nunca dizer "compre" — porque o assistente não conhece o patrimônio,
+o prazo nem a tolerância a perda de quem pergunta.
+
+**Dados:** endpoint público de gráficos do Yahoo Finance. Gratuito, sem
+cadastro, cobre B3 (`PETR4.SA`) e bolsas estrangeiras (`AAPL`) no mesmo
+formato. É um endpoint não documentado — estável há anos, mas pode mudar sem
+aviso. Quando mudar, a falha é explícita: o James diz que não conseguiu os
+dados, em vez de responder com número inventado.
 
 ---
 
@@ -148,21 +182,18 @@ Agrupado por esforço real, não por ordem da lista original.
 - Documento Word (`python-docx`) — irmão direto do módulo de Office
 
 **Esforço médio**
-- Automação sequencial (Fase 8, acima)
 - Casa inteligente via Home Assistant — API REST local, chave no `.env`
 - Celular via bot do Telegram — ponte de mão dupla, sem depender de UI
-- Pesquisa aprofundada — várias buscas encadeadas com síntese; depende da Fase 8
+- Pesquisa aprofundada — várias buscas encadeadas com síntese. A Fase 8 já dá
+  o encadeamento; falta uma ferramenta de busca que devolva **conteúdo**, não
+  só abra o navegador
 
 **Esforço alto ou dependente de hardware**
-- Múltiplos agentes — precisa da Fase 8 pronta primeiro; é orquestração de
-  planos paralelos com um agregador
+- Múltiplos agentes — a Fase 8 é a base. O que falta é orquestração de planos
+  em paralelo com um agregador, e um jeito de dar a cada agente um recorte do
+  catálogo de ferramentas em vez do catálogo inteiro
 - Gestos por webcam — MediaPipe HandLandmarker; custa CPU continuamente
 - Construtor de sites e de apps — geração de projeto inteiro; escopo grande
-- Ferramenta de investidor — **atenção**: calcular risco e sugerir compra de
-  ação é conselho financeiro. Dá para fazer a parte factual (cotação, histórico,
-  indicadores via API pública) com honestidade; "vê se compensa comprar" é onde
-  um modelo alucina com confiança e alguém perde dinheiro. Se entrar, entra
-  como *dados e comparação*, com o veredito explicitamente fora do escopo.
 
 ---
 
@@ -175,3 +206,27 @@ Agrupado por esforço real, não por ordem da lista original.
 - Free tiers mudam de regra sem aviso; o modo degradado existe para isso.
 - A latência depende da rede: dois provedores em sequência (percepção +
   raciocínio) significam dois ida-e-volta por turno.
+
+---
+
+## Lista de ferramentas pedidas — estado
+
+| Pedida | Estado | Observação |
+|---|---|---|
+| 📁 Organização de arquivos | ✅ | Por extensão. Por conteúdo (semântica) ainda não |
+| 📊 PowerPoint | ✅ | |
+| 📈 Planilhas | ✅ | Com gráfico opcional |
+| 👁️ Análise de câmera | ✅ | Nível 2 |
+| 🖥️ Análise de tela | ✅ | Nível 2 |
+| ⚡ Automação sequencial | ✅ | Fase 8 |
+| 📰 Briefing diário | ✅ | |
+| 💹 Investidor | ✅ | Fase 9 |
+| 📱 Mobile Connect | ⬜ | Bot de Telegram é o caminho mais direto |
+| 🏠 Casa inteligente | ⬜ | Só faz sentido com dispositivos smart em casa |
+| ✋ Gestos | ⬜ | Custa CPU continuamente; avaliar depois da Fase 0 real |
+| 🌐 Construtor de sites | ⬜ | Escopo grande |
+| 📱 Construtor de apps | ⬜ | Escopo grande |
+| 🤖 Múltiplos agentes | ⬜ | Base pronta (Fase 8) |
+| 🔍 Pesquisa aprofundada | ⬜ | Falta busca que devolva conteúdo |
+
+8 de 15 entregues.

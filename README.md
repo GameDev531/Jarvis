@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 7 implementadas. 428 testes automatizados.
+**Estado atual:** Fases 0 a 9 implementadas. 507 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -255,10 +255,63 @@ campo de renomeação; e argumentos do modelo com `"risco": "baixo"` ou
 | `ver_tela`, `ver_camera` | 2 | A imagem sai da máquina para ser analisada |
 | `criar_apresentacao`, `criar_planilha` | 1 | Arquivo novo na whitelist, nunca sobrescreve |
 | `briefing_do_dia` | 1 | Hora, clima (wttr.in), máquina e lembretes da memória |
+| `executar_sequencia` | 1 | Coordena; a autoridade fica em cada passo |
+| `analisar_acao`, `comparar_acoes` | 1 | Dados de mercado — análise, não recomendação |
 
 `ver_tela` e `ver_camera` nascem no Nível 2 de propósito: a tela pode ter senha
 e extrato bancário, e a câmera é a sua imagem. Configurável em
 `permissions.vision_requires_confirmation`, mas saiba o que está trocando.
+
+---
+
+## Automação sequencial
+
+"Pesquise X e monte uma planilha com o resultado" precisa que o passo 2 consuma
+a saída do passo 1. A ferramenta `executar_sequencia` faz isso: o modelo emite
+o plano inteiro numa requisição, e a execução acontece em Python.
+
+Um passo guarda o resultado sob um nome, e passos seguintes o referenciam:
+
+```json
+[
+  {"ferramenta": "analisar_acao", "argumentos": {"codigo": "PETR4.SA"},
+   "salvar_como": "petro", "descricao": "buscar dados"},
+  {"ferramenta": "criar_planilha",
+   "argumentos": {"titulo": "{{petro.ativo.nome}}", "colunas": ["Métrica", "Valor"],
+                  "linhas": [["Preço", "{{petro.ativo.preco}}"]]}}
+]
+```
+
+Duas regras que sustentam a segurança disso:
+
+- **A substituição acontece em Python, antes do guard.** Se o modelo resolvesse
+  as referências, poderia injetar qualquer caminho ou URL no lugar.
+- **O guard avalia cada passo no momento em que ele roda**, com os argumentos
+  já resolvidos. Aprovar o plano inteiro de antemão seria aprovar um caminho
+  que ainda não existia. A confirmação de Nível 2 também é por passo.
+
+---
+
+## Análise de investimentos
+
+    o código entrega FATOS calculáveis  →  o modelo faz a LEITURA
+
+`james/finance/` calcula retorno por período, volatilidade anualizada, queda
+máxima, distância do topo e posição frente às médias móveis. **Nenhuma linha de
+código opina** — há um teste que verifica que as descrições não contêm "compre",
+"venda", "barato", "caro" ou "oportunidade".
+
+A leitura fica com o modelo, sob a seção INVESTIMENTOS do prompt do sistema,
+que codifica o que separa quem acompanha mercado há décadas de um iniciante:
+não prever preço, perguntar o horizonte antes de tudo, não tratar um número
+isolado como tese, falar do que pode dar errado com o mesmo cuidado, distinguir
+volatilidade de risco, e nunca dizer "compre" — porque o assistente não conhece
+o patrimônio, o prazo nem a tolerância a perda de quem pergunta.
+
+Dados pelo endpoint público de gráficos do Yahoo Finance: gratuito, sem
+cadastro, cobre B3 (`PETR4.SA`) e bolsas estrangeiras (`AAPL`). É um endpoint
+não documentado — quando mudar, a falha é explícita, e o James diz que não
+conseguiu os dados em vez de inventar número.
 
 ---
 
@@ -347,6 +400,9 @@ python -m pytest tests/ -q          # 388 testes
 | `test_router.py` | Casamento local e recusa conservadora |
 | `test_office.py` | Geração real de .pptx e .xlsx, conversão de números |
 | `test_briefing.py` | Montagem do resumo, clima ausente, lembretes |
+| `test_plan.py` | Validação do plano e resolução de referências |
+| `test_executor.py` | Guard por passo, confirmação, interrupção |
+| `test_finance.py` | Métricas de mercado, tickers, resposta do provedor |
 | `test_hotkey.py` | Interpretação do atalho |
 
 ---
@@ -369,7 +425,10 @@ james/
   memory/             memória curada em markdown
   permissions/        guard, caminhos, confirmação determinística
   security/           sanitizador de conteúdo externo, PIN
-  tools/              apps, web, sistema, arquivos, visão, memória, office, briefing
+  agent/              plano de vários passos e execução encadeada
+  finance/            métricas de mercado (matemática pura) e cotações
+  tools/              apps, web, sistema, arquivos, visão, memória, office,
+                      briefing, sequência, investimentos
   ui/                 janela, HUD, orbe, bandeja, captura, diálogo
   state/              IPC, estado persistente
   hotkey/             kill switch global
@@ -389,8 +448,9 @@ james/
 - [x] **Fase 5** — arquivos com whitelist, análise de tela e câmera
 - [x] **Fase 6** — PIN e confirmação por janela
 - [x] **Fase 7** — PowerPoint, Excel com gráfico, briefing do dia
-- [ ] **Fase 8** — automação sequencial com encadeamento de resultados
-- [ ] **Fase 9** — wake word "James" própria (openWakeWord)
+- [x] **Fase 8** — automação sequencial com encadeamento de resultados
+- [x] **Fase 9** — análise de investimentos
+- [ ] **Fase 10** — wake word "James" própria (openWakeWord)
 - [ ] Backlog de ferramentas maiores: ver [PLANO.md](PLANO.md)
 
 O login por reconhecimento facial foi **retirado do escopo**: o MediaPipe

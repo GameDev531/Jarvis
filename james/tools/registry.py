@@ -69,12 +69,20 @@ class ToolRegistry:
         # quando o orquestrador e a interface Qt já subiram.
         self.llm = None
         self.screen_grabber = None
+        # A automação sequencial precisa poder confirmar um passo de risco e
+        # relatar progresso; quem sabe fazer as duas coisas é o orquestrador.
+        self.confirm_callback = None
+        self.progress_callback = None
 
     def attach_llm(self, client) -> None:
         self.llm = client
 
     def attach_screen_grabber(self, grabber) -> None:
         self.screen_grabber = grabber
+
+    def attach_callbacks(self, confirm=None, progress=None) -> None:
+        self.confirm_callback = confirm
+        self.progress_callback = progress
 
     def register(self, tool: Tool) -> None:
         if tool.handler is None:

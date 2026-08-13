@@ -97,6 +97,11 @@ class Orchestrator:
             tools=self.registry.schemas(),
         )
         self.registry.attach_llm(self.llm)
+        # A sequência confirma passos de risco e relata progresso pelos
+        # mesmos caminhos que um turno normal usa.
+        self.registry.attach_callbacks(
+            confirm=self._ask_confirmation, progress=self._progresso_do_plano
+        )
 
         self.pin_store = PinStore(config.root / "state" / "pin.json")
 
@@ -694,6 +699,15 @@ class Orchestrator:
                 self.interface.request_state.emit(state.value, degraded)
         if self.tray is not None:
             self.tray.set_state(state, degraded)
+
+    def _progresso_do_plano(self, indice: int, total: int, rotulo: str) -> None:
+        """Mostra em que passo a sequência está, sem falar em voz alta.
+
+        Narrar cada passo tornaria uma sequência de cinco itens insuportável de
+        ouvir; a janela mostra, a voz só resume no fim.
+        """
+        self._set_ui(UiState.EXECUTING)
+        self._show_caption(f"Passo {indice} de {total}: {rotulo}")
 
     def _show_caption(self, text: str) -> None:
         if self.interface is not None:

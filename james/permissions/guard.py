@@ -89,6 +89,11 @@ class Guard:
             "atualizar_memoria": self._rule_sem_risco,
             "consultar_memoria": self._rule_sem_risco,
             "briefing_do_dia": self._rule_sem_risco,
+            "analisar_acao": self._rule_sem_risco,
+            "comparar_acoes": self._rule_sem_risco,
+            # Coordena outras ferramentas e não age sozinha: a autoridade
+            # fica em cada passo, avaliado individualmente na execução.
+            "executar_sequencia": self._rule_sem_risco,
             # --- criação de documento: escreve arquivo NOVO na whitelist,
             #     sem sobrescrever nada, então não é irreversível ---
             "criar_apresentacao": self._rule_criar_documento,
