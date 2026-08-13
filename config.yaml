@@ -176,6 +176,60 @@ agentes:
 camera:
   device_index: 0            # 0 = webcam padrão
 
+# ---------------------------------------------------------------------------
+# MODOS — o que só liga quando você manda
+# ---------------------------------------------------------------------------
+# O James nasce fazendo o essencial: escuta a palavra de ativação, ouve, age e
+# responde. Nada mais consome CPU ou câmera. Um modo é uma capacidade que ocupa
+# recurso de forma contínua, e por isso fica desligada até você pedir:
+#
+#     "Jarvis, ativa a webcam"      -> liga o modo de gestos
+#     "Jarvis, desativa a webcam"   -> fecha a câmera (a luz apaga)
+#     "Jarvis, quais modos existem" -> lista o que há e o que está ligado
+#
+# Dois modos não podem disputar o mesmo recurso: se um já segura a câmera, o
+# outro é recusado em vez de os dois brigarem pelo dispositivo.
+modos:
+  gestos:
+    enabled: true
+    # `false` aqui não desliga só o rastreamento: o modo nem é registrado, e
+    # "ativa a webcam" responde que não existe esse modo.
+
+    # Arquivo do modelo de mão do MediaPipe. Baixe uma vez:
+    #   https://storage.googleapis.com/mediapipe-models/hand_landmarker/
+    #       hand_landmarker/float16/1/hand_landmarker.task
+    modelo: models/hand_landmarker.task
+
+    # Quadros por segundo do rastreamento. 6 é suficiente para gestos de mão
+    # (que duram quase um segundo) e é o que mantém o custo baixo enquanto o
+    # modo está ligado. Subir isto é a forma mais rápida de travar a máquina.
+    fps: 6
+
+    # Quantos quadros seguidos com o mesmo gesto antes de ele valer. Menos que
+    # 3 dispara com sombra e mão passando por acaso.
+    estabilidade: 4
+
+    # Segundos até o mesmo gesto poder disparar de novo.
+    descanso_s: 1.5
+
+    # Desliga sozinho depois deste tempo sem nenhum gesto. É a defesa contra o
+    # caso mais provável: ligar, esquecer, e a câmera ficar aberta a tarde
+    # inteira. 0 desativa o desligamento automático (não recomendado).
+    timeout_min: 10
+
+    # Gesto -> ação. As ações possíveis são fechadas e todas reversíveis num
+    # segundo: parar, pausar_escuta, volume_mais, volume_menos, mudo,
+    # desligar_modo. Um gesto NUNCA executa ação de Nível 2 — confirmar exige
+    # saber quem está pedindo, e uma mão na câmera não identifica ninguém.
+    # Deixe vazio ("") para um gesto não fazer nada.
+    mapeamento:
+      punho: parar
+      palma_aberta: pausar_escuta
+      polegar_cima: volume_mais
+      polegar_baixo: volume_menos
+      v: mudo
+      apontar: ""
+
 office:
   # Onde salvar apresentações e planilhas. Precisa estar em permissions.folders.
   # Vazio = usa a primeira pasta permitida.
@@ -191,6 +245,11 @@ permissions:
   # ATENÇÃO: deixar em `true` exige whisper.cpp instalado — sem confirmação por
   # voz, essas ações são recusadas.
   vision_requires_confirmation: true
+
+  # Modos cuja ATIVAÇÃO exige confirmação. Desativar nunca é bloqueado: se
+  # fechar a câmera dependesse de uma confirmação que pode falhar, ela ficaria
+  # aberta contra a vontade de quem pediu para fechá-la.
+  modos_sensiveis: [gestos]
 
   # --------- Nível 1: executa direto ---------
   # Apps permitidos. Chave = como você fala; valor = comando/executável.

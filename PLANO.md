@@ -24,10 +24,11 @@ descreve por que as coisas são como são e o que falta.
 | 11 — Habilidades | ✅ | `SKILL.md` local + instalação remota com fontes confiáveis |
 | 12 — Busca com conteúdo e pesquisa aprofundada | ✅ | Busca, leitura de página e investigação em rodadas |
 | 13 — Agentes especialistas | ✅ | Recorte de catálogo por perfil |
-| 14 — Wake word própria | ⬜ | Treino de "James" via openWakeWord |
-| 15 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
+| 14 — Modos e gestos | ✅ | Recursos contínuos ligam sob comando; webcam e gestos dentro disso |
+| 15 — Wake word própria | ⬜ | Treino de "James" via openWakeWord |
+| 16 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
 
-**613 testes automatizados.** Nada de Porcupine, Piper, whisper.cpp, Qt ou
+**692 testes automatizados.** Nada de Porcupine, Piper, whisper.cpp, Qt ou
 câmera foi executado em hardware real ainda — a Fase 0 existe para isso.
 
 ---
@@ -341,6 +342,113 @@ chamaria outro sem fim.
 
 ---
 
+## Fase 14 — Modos e gestos (feita)
+
+`james/modes/`, `james/tools/modes.py`, regras novas no guard.
+
+### A correção que originou a fase
+
+Eu tinha recusado gestos por webcam com este argumento: rastrear a mão consome
+CPU continuamente, na máquina que já é o gargalo — a mesma que travou com o
+overlay que cobria a tela.
+
+O argumento sobre o custo estava certo. A conclusão estava errada, e você
+apontou o porquê: **o custo só existe enquanto está ligado.** Se a webcam nasce
+desligada e só liga quando você manda, não há CPU consumida "o tempo todo" —
+há CPU consumida durante os minutos em que você quis. A objeção não era contra
+gestos; era contra gestos *sempre ativos*. E ninguém pediu isso.
+
+Daí o desenho geral que a fase entrega: **modos**.
+
+### O que é um modo
+
+Uma capacidade que ocupa recurso de forma contínua e fica desligada até alguém
+pedir. O James nasce fazendo o essencial — escutar a palavra de ativação, ouvir,
+agir, responder — e nada além disso toca a câmera ou a CPU.
+
+```
+"Jarvis, ativa a webcam"       -> ativar_modo(gestos)    -> confirma -> liga
+"Jarvis, desativa a webcam"    -> desativar_modo(gestos)  -> desliga, sem pergunta
+"Jarvis, quais modos existem"  -> listar_modos
+```
+
+Duas regras que valem para qualquer modo futuro, não só para gestos:
+
+1. **Um recurso, um dono.** Dois modos que precisem da câmera não ficam ligados
+   ao mesmo tempo; o gerente recusa o segundo em vez de deixar os dois brigarem
+   pelo dispositivo.
+2. **Desligar nunca é bloqueado.** Ligar pode exigir confirmação; desligar é
+   sempre imediato — inclusive quando a limpeza falha, caso em que o estado vira
+   "desligado" mesmo assim, para que uma segunda tentativa possa liberar o
+   recurso. Um freio que às vezes não funciona não é freio.
+
+### O que sustenta o custo baixo
+
+- **6 quadros por segundo** por padrão. Um gesto de mão dura quase um segundo;
+  30 fps seriam cinco vezes o custo para detectar a mesma coisa.
+- **Desligamento automático** depois de 10 minutos sem gesto. É a defesa contra
+  o caso mais provável de todos: ligar, esquecer, e a câmera ficar aberta a
+  tarde inteira.
+- **Nada é construído até ligar.** O OpenCV e o MediaPipe são importados dentro
+  do `_ligar`. Com o modo desligado, o custo é uma classe na memória.
+- **`desligar_todos()`** roda no encerramento e no `Ctrl+Alt+J`. Quem aperta a
+  tecla de pânico com a câmera ligada quer a luz apagando, não só o James
+  calando a boca.
+
+### A trava que mais importa
+
+**Um gesto nunca executa ação de Nível 2.**
+
+O motivo é que o Nível 2 existe justamente para ter certeza de *quem* está
+mandando — e uma mão na frente da câmera não identifica ninguém. Pode ser outra
+pessoa na sala, pode ser você numa videochamada, pode ser uma foto. Se o guard
+responder CONFIRM a uma ação pedida por gesto, ela é **recusada**, não promovida
+a uma pergunta: promovê-la transformaria "qualquer um na sala" em "qualquer um
+na sala que consiga dizer sim".
+
+O que sobra para gesto é uma lista fechada e toda reversível em um segundo:
+parar, pausar a escuta, volume, e desligar o próprio modo. Um gesto não chama
+ferramenta por nome — ele pede uma ação da lista, e a ação é que passa pelo
+guard. Não existe caminho de "punho" até "mover arquivo", nem por engano nem
+por configuração errada: uma ação desconhecida no `config.yaml` é descartada no
+carregamento.
+
+### Por que o classificador é matemática pura
+
+`classificar()` recebe 21 pontos e devolve um nome. Não sabe o que é câmera,
+thread ou MediaPipe — e por isso a suíte testa "mão fechada vira punho" sem
+hardware nenhum, inclusive com a mão girada em quatro ângulos.
+
+A extensão de cada dedo é medida por **distância radial até o pulso**, não por
+altura na imagem. Comparar `y` só funciona com a mão perfeitamente em pé, e
+ninguém segura a mão assim. A altura só entra num lugar, onde ela é o próprio
+sinal: distinguir polegar para cima de polegar para baixo.
+
+### Por que o debounce tem duas travas
+
+Sem ele, uma mão passando na frente da câmera dispararia dezenas de comandos por
+segundo. Com uma trava só, ainda dispararia errado:
+
+- **Estabilidade** (4 quadros iguais) mata o quadro isolado mal classificado.
+- **Descanso** (1,5 s) impede que segurar a mão parada aumente o volume trinta
+  vezes.
+
+As duas se exigem em conjunto — o gesto precisa sair de cena **e** o descanso
+precisa passar. Um teste guarda exatamente isso, e ele pegou um defeito real:
+a primeira versão limpava o descanso quando a mão saía do quadro, o que
+transformava o "e" num "ou" e deixava furar o intervalo tirando a mão por um
+quadro.
+
+### Estado
+
+Precisa do `opencv-python`, do `mediapipe` e do arquivo `hand_landmarker.task`
+(link no `config.yaml`). Nada disso foi rodado em hardware real ainda — se o
+MediaPipe travar a máquina mesmo a 6 fps, o passo seguinte é o que você já
+apontou: trocar o rastreamento local por uma API gratuita equivalente. A
+fronteira para isso já existe: basta outro `detector_factory`.
+
+---
+
 ## O que falta, e por quê
 
 Registrado com sinceridade, incluindo o que eu decidi **não** fazer.
@@ -362,13 +470,12 @@ Registrado com sinceridade, incluindo o que eu decidi **não** fazer.
 - **Wake word "James" própria** — treinar openWakeWord exige gerar milhares de
   amostras sintéticas. É um mini-projeto; "Jarvis" segura a identidade até lá.
 
-**Decidi não fazer, e o motivo**
-- **Gestos por webcam.** É o pior custo-benefício da lista para esta máquina
-  específica: exige rastreamento de mão rodando o tempo todo, consumindo CPU
-  continuamente na máquina que já é o gargalo do projeto — a mesma que travou
-  com o overlay sobreposto. E o que ele destrava (mutar som, trocar aba) já
-  está a uma frase de distância pela voz. Se você quiser mesmo assim, eu faço:
-  é sua decisão, e a Fase 0 na sua máquina dá o número real de folga de CPU.
+**O que eu tinha decidido não fazer — e por que mudei**
+- **Gestos por webcam.** Eu havia recusado, com o argumento de que rastrear a
+  mão consumiria CPU continuamente na máquina que já é o gargalo. O argumento
+  estava certo sobre o custo e errado sobre a conclusão: ele só vale se o
+  rastreamento estiver sempre ligado. Você apontou o desenho correto — modos —
+  e ele dissolve a objeção inteira. Está feito, na Fase 14.
 
 ---
 
@@ -386,10 +493,10 @@ Registrado com sinceridade, incluindo o que eu decidi **não** fazer.
 | 💹 Investidor | ✅ | Fase 9 |
 | 📱 Mobile Connect | ⬜ | Bot de Telegram é o caminho mais direto |
 | 🏠 Casa inteligente | ⬜ | Só faz sentido com dispositivos smart em casa |
-| ✋ Gestos | ⬜ | Custa CPU continuamente; avaliar depois da Fase 0 real |
+| ✋ Gestos | ✅ | Fase 14, dentro de um modo — CPU zero enquanto desligado |
 | 🌐 Construtor de sites | ⬜ | Escopo grande |
 | 📱 Construtor de apps | ⬜ | Escopo grande |
 | 🤖 Múltiplos agentes | ✅ | Fase 13, com recorte de catálogo |
 | 🔍 Pesquisa aprofundada | ✅ | Fase 12, sem gastar cota nas rodadas |
 
-**10 de 15 entregues.** As cinco restantes e o motivo estão em "O que falta".
+**11 de 15 entregues.** As quatro restantes e o motivo estão em "O que falta".

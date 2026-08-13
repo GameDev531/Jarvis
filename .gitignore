@@ -9,6 +9,8 @@ logs/*.log
 logs/*.jsonl
 state/
 runtime_state.json
+# Memória curada: conteúdo pessoal, gerado na primeira execução
+memories/
 usage_counters.json
 james.lock
 
@@ -19,6 +21,7 @@ models/
 *.onnx.json
 *.ppn
 *.bin
+*.task
 
 # Python
 __pycache__/

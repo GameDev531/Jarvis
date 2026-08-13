@@ -120,6 +120,19 @@ class Guard:
             "ver_tela": self._rule_ver_tela,
             "ver_camera": self._rule_ver_camera,
             "instalar_habilidade": self._rule_instalar_habilidade,
+            # --- modos ---
+            "listar_modos": self._rule_sem_risco,
+            "ativar_modo": self._rule_ativar_modo,
+            # Desligar é Nível 1 sempre, por princípio (ver a regra).
+            "desativar_modo": self._rule_desativar_modo,
+        }
+
+        # Modos que ocupam hardware de privacidade. Ligar qualquer um deles
+        # exige confirmação; o gerente é a fonte da verdade em tempo de
+        # execução, esta lista é o padrão de quando ele ainda não existe.
+        self.sensitive_modes = {
+            normalize_text(str(nome))
+            for nome in (config.get("permissions.modos_sensiveis", ["gestos"]) or [])
         }
 
     # ------------------------------------------------------------ entrada
@@ -431,6 +444,54 @@ class Guard:
                 f"Confirma, {self.treatment}?"
             ),
             args={"pergunta": pergunta},
+        )
+
+    # ------------------------------------------------------------- modos
+
+    def _rule_ativar_modo(self, args: dict[str, Any]) -> GuardVerdict:
+        nome = normalize_text(strip_dangerous_chars(str(args.get("modo", "") or "")))
+        if not nome:
+            return self._block("ativar_modo", "modo sem nome", "Qual modo eu ligo, {t}?")
+
+        if nome not in self.sensitive_modes:
+            return GuardVerdict(
+                tool="ativar_modo",
+                decision=Decision.ALLOW,
+                reason=f"modo '{nome}' não ocupa hardware sensível",
+                spoken="",
+                args={"modo": nome},
+            )
+
+        # Ligar um modo de câmera é diferente de tirar uma foto: a foto acaba,
+        # o modo fica. Por isso a frase diz "até você mandar desligar" — quem
+        # confirma precisa saber que está autorizando algo contínuo.
+        return GuardVerdict(
+            tool="ativar_modo",
+            decision=Decision.CONFIRM,
+            reason=f"modo '{nome}' mantém a câmera aberta enquanto estiver ligado",
+            spoken=(
+                f"Vou ligar o modo {nome} e manter a câmera aberta até você mandar "
+                f"desligar. Confirma, {self.treatment}?"
+            ),
+            args={"modo": nome},
+        )
+
+    def _rule_desativar_modo(self, args: dict[str, Any]) -> GuardVerdict:
+        """Desligar nunca é bloqueado nem confirmado.
+
+        Não é descuido: é o desenho. Se desligar a câmera exigisse confirmação,
+        haveria um estado em que o usuário pede para fechar a câmera e o
+        sistema responde com uma pergunta — e se a confirmação falhasse (sem
+        whisper.cpp, microfone ocupado, ruído), a câmera ficaria aberta contra
+        a vontade dele. Um freio que às vezes não funciona não é freio.
+        """
+        nome = normalize_text(strip_dangerous_chars(str(args.get("modo", "") or "")))
+        return GuardVerdict(
+            tool="desativar_modo",
+            decision=Decision.ALLOW,
+            reason="desligar um modo libera recurso e nunca é negado",
+            spoken="",
+            args={"modo": nome},
         )
 
     # -------------------------------------------------------------- URLs

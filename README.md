@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 13 implementadas. 613 testes automatizados.
+**Estado atual:** Fases 0 a 14 implementadas. 692 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -45,6 +45,7 @@ python -m venv .venv
 pip install -e ".[dev]"
 pip install -e ".[office]"     # opcional: PowerPoint e Excel
 pip install -e ".[camera]"     # opcional: análise de câmera
+pip install -e ".[gestures]"   # opcional: modo de gestos (desligado por padrão)
 ```
 
 ### 2. Chaves de API
@@ -126,8 +127,13 @@ python check_hardware.py
 
 Testa, **cada um em subprocesso isolado**, se cada peça funciona nesta máquina:
 flags reais do processador, ONNX Runtime, webrtcvad, Porcupine, Piper (com
-razão de tempo real), whisper.cpp, latência de rede e desenho do HUD. Gera
-`hardware_report.json`.
+razão de tempo real), whisper.cpp, latência de rede, desenho do HUD e o custo do
+rastreamento de mão. Gera `hardware_report.json`.
+
+O teste de gestos responde a uma pergunta concreta: se o MediaPipe local não
+sustentar o dobro dos 6 fps que o modo usa, o rastreamento precisa sair da
+máquina e virar chamada a uma API de visão. O código já está pronto para essa
+troca — só muda o `detector_factory`.
 
 O isolamento existe porque uma biblioteca compilada para um processador mais
 novo morre com *instrução ilegal* — um sinal do sistema operacional, não uma
@@ -262,10 +268,78 @@ campo de renomeação; e argumentos do modelo com `"risco": "baixo"` ou
 | `buscar_na_web`, `ler_pagina`, `pesquisa_aprofundada` | 1 | Trazem conteúdo para dentro |
 | `delegar` | 1 | Aciona especialista; cada passo dele passa pelo guard |
 | `instalar_habilidade` | 2 | Instruções de terceiros entrando no contexto |
+| `listar_modos`, `desativar_modo` | 1 | Desligar um modo nunca é bloqueado |
+| `ativar_modo` | 2 | Ligar a webcam mantém a câmera aberta até você mandar parar |
 
 `ver_tela` e `ver_camera` nascem no Nível 2 de propósito: a tela pode ter senha
 e extrato bancário, e a câmera é a sua imagem. Configurável em
 `permissions.vision_requires_confirmation`, mas saiba o que está trocando.
+
+---
+
+## Modos — o que só liga quando você manda
+
+O James nasce fazendo o essencial: escuta a palavra de ativação, ouve, age e
+responde. **Nada além disso consome CPU ou câmera.** Uma capacidade que ocupa
+recurso de forma contínua é um *modo*, e um modo fica desligado até você pedir.
+
+```
+"Jarvis, ativa a webcam"        liga o modo de gestos (pede confirmação)
+"Jarvis, desativa a webcam"     fecha a câmera — a luz apaga
+"Jarvis, quais modos existem"   lista o que há e o que está ligado
+```
+
+Duas regras valem para qualquer modo:
+
+- **Um recurso, um dono.** Dois modos não disputam a mesma câmera; o segundo é
+  recusado com uma frase clara em vez de os dois brigarem pelo dispositivo.
+- **Desligar nunca é bloqueado.** Ligar pode exigir confirmação; desligar é
+  sempre imediato. Se desligar dependesse de uma confirmação que pode falhar
+  (sem whisper.cpp, microfone ocupado, ruído), a câmera ficaria aberta contra a
+  vontade de quem pediu para fechá-la.
+
+`Ctrl+Alt+J` e o encerramento do programa desligam todos os modos. Quem aperta
+a tecla de pânico com a câmera ligada quer a luz apagando, não só o James
+calando a boca.
+
+### Modo de gestos
+
+Rastreamento de mão pela webcam, **só enquanto o modo está ligado**.
+
+| Gesto | Ação padrão |
+|---|---|
+| ✊ Punho | Para a fala e cancela o turno |
+| ✋ Palma aberta | Pausa / retoma a escuta |
+| 👍 Polegar para cima | Aumenta o volume |
+| 👎 Polegar para baixo | Diminui o volume |
+| ✌️ V | Alterna o som (mudo) |
+| ☝️ Apontar | Sem ação (livre para você mapear) |
+
+O que mantém o custo baixo, tudo em `modos.gestos` no `config.yaml`:
+
+- **6 fps.** Um gesto de mão dura quase um segundo; 30 fps custariam cinco
+  vezes mais para detectar exatamente a mesma coisa.
+- **Desliga sozinho** após 10 minutos sem gesto — a defesa contra ligar,
+  esquecer, e a câmera ficar aberta a tarde inteira.
+- **Nada é carregado até ligar.** OpenCV e MediaPipe são importados dentro do
+  `_ligar`; com o modo desligado, o custo é uma classe na memória.
+
+**Um gesto nunca executa ação de Nível 2.** O Nível 2 existe para ter certeza
+de *quem* está mandando, e uma mão na frente da câmera não identifica ninguém —
+pode ser outra pessoa, pode ser uma foto. Se o guard pedir confirmação, a ação
+pedida por gesto é recusada, não promovida a uma pergunta. Por isso a lista de
+ações de gesto é fechada e toda reversível em um segundo: um gesto não chama
+ferramenta por nome, e não existe caminho de "punho" até "mover arquivo".
+
+Precisa de duas dependências e um arquivo de modelo:
+
+```bash
+pip install opencv-python mediapipe
+# hand_landmarker.task -> models/ (link no config.yaml)
+```
+
+Sem eles, ligar o modo devolve uma frase explicando o que falta — o resto do
+James continua funcionando normalmente.
 
 ---
 
@@ -444,7 +518,7 @@ por voz sai **uma vez**, não a cada turno.
 ## Testes
 
 ```bash
-python -m pytest tests/ -q          # 388 testes
+python -m pytest tests/ -q          # 692 testes
 ```
 
 | Arquivo | O que cobre |
@@ -474,6 +548,9 @@ python -m pytest tests/ -q          # 388 testes
 | `test_skills.py` | Cabeçalho, busca, travas da instalação remota |
 | `test_web.py` | Extração de HTML e leitura de resultados de busca |
 | `test_team.py` | Recorte de catálogo, guard inalterado, teto de iterações |
+| `test_modes.py` | Padrão desligado, um dono por recurso, desligar que nunca falha |
+| `test_gestures.py` | Classificação com mão girada, debounce, câmera liberada |
+| `test_mode_tools.py` | Gesto recusado no Nível 2, ferramentas de modo, guard |
 | `test_hotkey.py` | Interpretação do atalho |
 
 ---
@@ -494,6 +571,7 @@ james/
   voice/              Piper, whisper.cpp, divisão em sentenças, streaming
   llm/                cliente único, papéis, Gemini, OpenRouter, roteador, cota
   memory/             memória curada (markdown) e profunda (SQLite)
+  modes/              modos que ligam sob comando: gerente, gestos, ações
   skills/             habilidades carregadas sob demanda
   permissions/        guard, caminhos, confirmação determinística
   security/           sanitizador de conteúdo externo, PIN
@@ -501,7 +579,7 @@ james/
   web/                busca e extração de texto de páginas
   finance/            métricas de mercado (matemática pura) e cotações
   tools/              apps, web, sistema, arquivos, visão, memória, office,
-                      briefing, sequência, investimentos
+                      briefing, sequência, investimentos, modos
   ui/                 janela, HUD, orbe, bandeja, captura, diálogo
   state/              IPC, estado persistente
   hotkey/             kill switch global
@@ -527,7 +605,8 @@ james/
 - [x] **Fase 11** — habilidades carregadas sob demanda
 - [x] **Fase 12** — busca com conteúdo e pesquisa aprofundada
 - [x] **Fase 13** — agentes especialistas com recorte de catálogo
-- [ ] **Fase 14** — wake word "James" própria (openWakeWord)
+- [x] **Fase 14** — modos sob comando e gestos por webcam
+- [ ] **Fase 15** — wake word "James" própria (openWakeWord)
 - [ ] Backlog de ferramentas maiores: ver [PLANO.md](PLANO.md)
 
 O login por reconhecimento facial foi **retirado do escopo**: o MediaPipe

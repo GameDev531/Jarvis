@@ -40,6 +40,7 @@ from james.llm.router import LocalRouter
 from james.logs import audit, get_logger, setup_logging
 from james.memory import MemoryStore
 from james.memory.fact_store import FactStore
+from james.modes import GestureActions, build_manager as build_modes
 from james.skills import SkillRegistry
 from james.permissions.confirm import Confirmation, ConfirmationMatcher
 from james.permissions.guard import Decision, Guard
@@ -83,8 +84,25 @@ class Orchestrator:
         )
         self.skills = SkillRegistry(config.resolve_path("skills.dir", "skills"))
 
+        # Modos e ferramentas se referenciam em círculo: as ferramentas de modo
+        # precisam do gerente, e um gesto precisa executar ferramentas. O nó se
+        # desfaz com `_on_gesto`, que só resolve `self.gesture_actions` na hora
+        # em que um gesto acontece — muito depois de ambos existirem.
+        self.modes = build_modes(config, on_acao=self._on_gesto)
         self.registry = build_registry(
-            config, self.guard, self.memory, facts=self.facts, skills=self.skills
+            config,
+            self.guard,
+            self.memory,
+            facts=self.facts,
+            skills=self.skills,
+            modes=self.modes,
+        )
+        self.gesture_actions = GestureActions(
+            self.guard,
+            self.registry,
+            on_parar=self.cancel,
+            on_pausar=self._toggle_pause,
+            on_desligar_modo=lambda: self.modes.desligar("gestos"),
         )
         self.router = LocalRouter(
             self.guard.apps, enabled=bool(config.get("llm.local_router.enabled", True))
@@ -239,7 +257,7 @@ class Orchestrator:
             return
         try:
             self.hotkey = GlobalHotkey(
-                str(self.config.get("killswitch.hotkey", "ctrl+alt+j")), self.cancel
+                str(self.config.get("killswitch.hotkey", "ctrl+alt+j")), self.panic
             )
         except HotkeyError as exc:
             logger.error("Kill switch não configurado: %s", exc)
@@ -264,10 +282,17 @@ class Orchestrator:
                 self.ipc.send({"type": "heartbeat"})
             time.sleep(interval)
 
+    def _on_gesto(self, gesto: str, acao: str) -> None:
+        """Chamado pela thread do modo de gestos, nunca pelo laço principal."""
+        self.gesture_actions.executar(gesto, acao)
+
     def shutdown(self) -> None:
         logger.info("Encerrando o James.")
         self._running.clear()
         self._events.put(_SHUTDOWN)
+        # Antes de qualquer outra coisa: soltar câmera e afins. Se o
+        # encerramento falhar mais adiante, o hardware já está livre.
+        self.modes.desligar_todos()
         if self.speaker is not None:
             self.speaker.stop()
         if self.player is not None:
@@ -300,6 +325,20 @@ class Orchestrator:
         if self.player is not None:
             self.player.stop()
         self._events.put(_CANCEL)
+
+    def panic(self) -> None:
+        """O que a tecla de pânico faz: cancelar E soltar todo o hardware.
+
+        É mais forte que `cancel` de propósito. Quem aperta Ctrl+Alt+J com a
+        câmera ligada quer a luz apagando, não só o James calando a boca. O
+        gesto de "parar" continua chamando só `cancel` — senão um punho
+        acidental desligaria o próprio modo de gestos, e a única forma de
+        voltar seria pela voz.
+        """
+        self.cancel()
+        desligados = self.modes.desligar_todos()
+        if desligados:
+            logger.info("Kill switch desligou os modos: %s", ", ".join(desligados))
 
     def _toggle_pause(self) -> None:
         self._paused = not self._paused

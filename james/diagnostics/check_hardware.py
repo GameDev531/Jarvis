@@ -503,6 +503,90 @@ def check_qt() -> CheckResult:
     )
 
 
+def check_gestures() -> CheckResult:
+    """Mede o custo real do rastreamento de mão nesta máquina.
+
+    É o número que decide uma questão em aberto: se o MediaPipe local trava a
+    máquina mesmo a 6 quadros por segundo, o rastreamento precisa sair daqui e
+    virar chamada a uma API. O modo de gestos foi escrito com essa saída pronta
+    — trocar o `detector_factory` é tudo o que muda.
+
+    O teste é **não crítico** de propósito: o modo nasce desligado, então uma
+    máquina sem MediaPipe roda o James inteiro sem perder nada.
+    """
+    try:
+        import numpy as np
+    except ImportError as exc:
+        return CheckResult(
+            "gestos", False, error=f"numpy não instalado: {exc}", critical=False
+        )
+    try:
+        import mediapipe  # noqa: F401
+    except ImportError:
+        return CheckResult(
+            "gestos",
+            False,
+            detail="MediaPipe não instalado — o modo de gestos fica indisponível",
+            error='instale com: pip install -e ".[gestures]"',
+            critical=False,
+        )
+
+    from pathlib import Path
+
+    modelo = Path("models/hand_landmarker.task")
+    if not modelo.exists():
+        return CheckResult(
+            "gestos",
+            False,
+            detail=f"modelo não encontrado em {modelo}",
+            error="baixe hand_landmarker.task (link no config.yaml)",
+            critical=False,
+        )
+
+    from james.modes.gestures import MediaPipeHands
+
+    started = time.monotonic()
+    detector = MediaPipeHands(str(modelo))
+    carga_s = time.monotonic() - started
+
+    # Ruído, não imagem preta: um quadro uniforme sai barato demais e daria um
+    # número otimista que não se repete com a webcam de verdade.
+    gerador = np.random.default_rng(7)
+    quadro = gerador.integers(0, 255, (480, 640, 3), dtype=np.uint8)
+
+    quadros = 20
+    started = time.monotonic()
+    try:
+        for indice in range(quadros):
+            detector.detectar(quadro, indice * 100)
+    finally:
+        detector.fechar()
+    elapsed = time.monotonic() - started
+
+    por_quadro_ms = (elapsed / quadros) * 1000
+    fps_possivel = quadros / elapsed if elapsed > 0 else 0.0
+    # O padrão do config é 6 fps. Se a máquina não sustenta o dobro disso, o
+    # modo vai competir com o pipeline de voz enquanto estiver ligado.
+    ok = fps_possivel >= 12
+    return CheckResult(
+        name="gestos",
+        ok=ok,
+        detail=(
+            f"{por_quadro_ms:.0f} ms por quadro (~{fps_possivel:.0f} fps possíveis; "
+            f"o modo usa 6), modelo carregado em {carga_s:.1f} s"
+        ),
+        error=""
+        if ok
+        else "rastreamento local lento — considere trocar por uma API de visão",
+        metrics={
+            "ms_por_quadro": round(por_quadro_ms, 1),
+            "fps_possivel": round(fps_possivel, 1),
+            "carga_s": round(carga_s, 2),
+        },
+        critical=False,
+    )
+
+
 CHECKS: dict[str, Callable[[], CheckResult]] = {
     "cpu": check_cpu,
     "onnxruntime": check_onnxruntime,
@@ -512,6 +596,7 @@ CHECKS: dict[str, Callable[[], CheckResult]] = {
     "whisper": check_whisper,
     "rede": check_network,
     "qt": check_qt,
+    "gestos": check_gestures,
 }
 
 

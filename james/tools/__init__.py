@@ -10,7 +10,9 @@ Ela volta quando os nós remotos entrarem.
 from james.tools.registry import Tool, ToolRegistry, ToolResult
 
 
-def build_registry(config, guard, memory=None, facts=None, skills=None) -> ToolRegistry:
+def build_registry(
+    config, guard, memory=None, facts=None, skills=None, modes=None
+) -> ToolRegistry:
     """Monta o catálogo completo. Cada módulo registra as suas."""
     from james.tools import (
         apps, briefing, files, investing, office, research, sequence, system, vision, web,
@@ -41,6 +43,11 @@ def build_registry(config, guard, memory=None, facts=None, skills=None) -> ToolR
         from james.tools import knowledge
 
         knowledge.register_skills(registry, config, guard, skills)
+
+    if modes is not None:
+        from james.tools import modes as mode_tools
+
+        mode_tools.register(registry, config, guard, modes)
 
     # Por último: sequência e delegação consultam o catálogo — a primeira
     # para validar os passos, a segunda para montar os recortes por perfil.
