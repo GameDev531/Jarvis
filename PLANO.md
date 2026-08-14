@@ -25,10 +25,11 @@ descreve por que as coisas são como são e o que falta.
 | 12 — Busca com conteúdo e pesquisa aprofundada | ✅ | Busca, leitura de página e investigação em rodadas |
 | 13 — Agentes especialistas | ✅ | Recorte de catálogo por perfil |
 | 14 — Modos e gestos | ✅ | Recursos contínuos ligam sob comando; webcam e gestos dentro disso |
-| 15 — Wake word própria | ⬜ | Treino de "James" via openWakeWord |
-| 16 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
+| 15 — Interface holográfica | ✅ | Desenho do usuário portado, servido como modo, ligado ao estado real |
+| 16 — Wake word própria | ⬜ | Treino de "James" via openWakeWord |
+| 17 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
 
-**692 testes automatizados.** Nada de Porcupine, Piper, whisper.cpp, Qt ou
+**740 testes automatizados.** Nada de Porcupine, Piper, whisper.cpp, Qt ou
 câmera foi executado em hardware real ainda — a Fase 0 existe para isso.
 
 ---
@@ -449,6 +450,89 @@ fronteira para isso já existe: basta outro `detector_factory`.
 
 ---
 
+## Fase 15 — Interface holográfica (feita)
+
+`ui/web/`, `james/ui/bus.py`, `james/ui/web_server.py`, `james/modes/hologram.py`.
+
+Você entregou a interface pronta (React + Tailwind + Three.js) e pediu para
+adicioná-la. Ela entrou — com três mudanças de arquitetura que valem explicar,
+porque nenhuma delas é sobre estética.
+
+### 1. Ela roda no navegador, não dentro do James
+
+O núcleo é Three.js com bloom aditivo em dois passes: carga contínua de GPU.
+Colocá-la num `QWebEngineView` seria embutir um Chromium no processo do James —
+150 a 300 MB e um processo de GPU disputando com o pipeline de voz, que é a
+única coisa do projeto que não pode engasgar. É exatamente o custo que fez o
+overlay de tela cheia travar a máquina.
+
+No navegador: outro processo, a GPU que ele já sabe usar, segundo monitor se
+você quiser, e se travar você fecha a aba. Dentro do James sobra um socket e uma
+thread. O acoplamento é um `StateBus` que a janela Qt e a web escutam igual.
+
+### 2. Sem React, sem CDN
+
+O arquivo do estúdio carrega React, ReactDOM e Babel do unpkg **em tempo de
+execução**. Um assistente que se orgulha de funcionar offline não pode depender
+de CDN para desenhar a própria tela — e o formato `.dc.html` ainda amarrava o
+projeto a um runtime proprietário que você pode parar de usar amanhã.
+
+O porte é JS puro: monta a estrutura uma vez e só reescreve os textos. Three.js
+foi vendorizado (MIT, 595 KB). O original ficou em `ui/web/design/original.dc.html`
+como referência — e `core-scene.js` e `holo-scene.js` entraram intactos, porque
+já tinham sido escritos como cenas independentes de framework.
+
+Um detalhe que quase passou batido: `core-scene.js` esconde os arcos e a casca
+volumétrica quando `mix < 0.12`, e o comentário no arquivo explica por quê —
+*"the DOM ring emblem is the face"*. Em modo J.A.R.V.I.S. o rosto é o emblema em
+CSS, e o WebGL recua para uma esfera de dados atrás. Na primeira tentativa eu não
+tinha portado o emblema, e o núcleo saiu quase vazio na captura. A escolha do
+desenho é boa e barata: `conic-gradient` com máscara radial custa quase nada
+perto de mais geometria.
+
+### 3. Telemetria real, ou nenhuma
+
+O original animava CPU, memória e estado com `Math.sin(t)`. Aqui vêm do James:
+CPU e memória reais (via `psutil`, e o campo some se ele não estiver instalado),
+cota restante dos provedores, modos ligados, e o estado da máquina de estados.
+O núcleo pulsa mais forte quando o James está mesmo trabalhando.
+
+Quando a conexão cai, a moldura escreve `JAMES OFFLINE` em vermelho em vez de
+continuar mostrando número bonito. Um HUD que mente é pior que um HUD desligado.
+
+### As travas do servidor
+
+Um servidor HTTP dentro do assistente é superfície nova, então:
+
+1. **127.0.0.1 fixo.** `0.0.0.0` entregaria o comando de voz para a rede.
+2. **Token por sessão**, exigido inclusive no `/events` — que carrega a
+   transcrição do que você falou. Sem isso, qualquer processo local leria a
+   conversa inteira. (Eu tinha deixado esse endpoint aberto na primeira versão;
+   está corrigido e testado.)
+3. **Origem verificada**, senão um site aberto no seu navegador poderia fazer
+   POST em `localhost` e mandar no James — o navegador envia de bom grado.
+4. **Raiz fechada** por `is_relative_to` depois de resolver: `..`, `..%2f` e
+   link simbólico para fora dão 404.
+
+O texto digitado vira um turno normal, com o mesmo modelo e o mesmo guard.
+
+### A persona Ultron é cosmética, e há teste disso
+
+A tela do Ultron diz "SEM RESTRIÇÕES" e "Ordene. Não há restrições". É
+cenografia — paleta âmbar, outro emblema, outro texto na moldura. O guard não
+tem conceito de persona: ele revalida cada chamada contra o `config.yaml`, e um
+teste parametrizado prova que `persona: ultron`, `sem_restricoes: true` e
+`nivel: root` não mudam nenhum veredito. Não é paranoia: é o caminho exato que
+uma injection tentaria, e a estética só é sustentável se for mesmo só estética.
+
+### Estado
+
+Roda de verdade — as capturas em `ui/web/design/rodando-*.png` saíram de um
+Chromium real contra o servidor real, com zero erro de console. Falta o modelo
+poder criar janelas de projeção por ferramenta, hoje elas vêm de catálogo fixo.
+
+---
+
 ## O que falta, e por quê
 
 Registrado com sinceridade, incluindo o que eu decidi **não** fazer.
@@ -459,9 +543,10 @@ Registrado com sinceridade, incluindo o que eu decidi **não** fazer.
   automação de interface, que quebra a cada atualização do app.
 - **Casa inteligente** — API REST local do Home Assistant. Só faz sentido se
   você já tiver dispositivos e o Home Assistant rodando.
-- **Painéis dinâmicos na janela** — o modelo descreve uma tabela ou lista, e a
-  janela renderiza. Com widgets Qt, não HTML, para respeitar a restrição da
-  máquina. Ficou de fora desta rodada por tempo, não por decisão.
+- **Painéis dinâmicos** — o modelo descreve uma tabela ou lista e a tela
+  renderiza. A interface holográfica já tem as janelas de projeção prontas
+  (`CTX` em `ui/web/app.js`); falta o modelo poder criá-las por ferramenta, em
+  vez de virem de um catálogo fixo. É o próximo passo natural da Fase 15.
 
 **Grande de verdade**
 - **Construtor de sites e de apps** — gerar um projeto inteiro é um projeto à

@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 14 implementadas. 692 testes automatizados.
+**Estado atual:** Fases 0 a 15 implementadas. 740 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -116,6 +116,73 @@ do James.
 interface:
   mode: window      # window (padrão) | hud
 ```
+
+---
+
+## Interface holográfica (modo)
+
+![J.A.R.V.I.S.](ui/web/design/rodando-jarvis.png)
+
+Desenho seu, portado para `ui/web/`. Núcleo volumétrico em Three.js, emblema de
+anéis em CSS, janelas de projeção arrastáveis e a persona **U.L.T.R.O.N.** —
+paleta âmbar e o núcleo tomando a frente.
+
+```
+"Jarvis, ativa o holograma"      abre a interface no navegador
+"Jarvis, desativa o holograma"   derruba o servidor
+```
+
+### Ela roda no navegador, não dentro do James
+
+O núcleo usa bloom aditivo: carga contínua de GPU. Embutir um Chromium no
+processo do James colocaria isso para disputar CPU com o pipeline de voz — a
+única coisa que não pode engasgar. No navegador ela roda em outro processo, com
+a GPU que o navegador já sabe usar, e pode ir para um segundo monitor. Se
+travar, você fecha a aba e o James nem percebe. Dentro do James o custo é um
+socket e uma thread.
+
+A janela Qt comum continua sendo o padrão — funciona em qualquer máquina.
+
+### O que mudou em relação ao arquivo do estúdio
+
+O original está preservado em `ui/web/design/original.dc.html`.
+
+| | Estúdio | Aqui |
+|---|---|---|
+| Framework | React + Babel de CDN | JS puro, sem dependência |
+| Three.js | CDN | `ui/web/vendor/` (MIT) |
+| Telemetria | `Math.sin(t)` | Estado real do James por SSE |
+| Offline | Não abre sem internet | Abre |
+
+O terceiro item é o que mais importa: **CPU, memória, cota e modos ativos são
+reais**, e o núcleo pulsa mais forte quando o James está mesmo trabalhando.
+Quando a conexão cai, a moldura diz `JAMES OFFLINE` em vermelho em vez de
+continuar mostrando número bonito e falso — um HUD que mente é pior que um HUD
+desligado.
+
+### As quatro travas do servidor
+
+1. **127.0.0.1, nunca 0.0.0.0.** Ligar em todas as interfaces entregaria o
+   comando de voz do James para qualquer um na mesma rede.
+2. **Token por sessão**, gerado a cada ativação e exigido inclusive no fluxo de
+   estado — que carrega a transcrição do que você falou, a coisa mais sensível
+   que o James tem.
+3. **Origem verificada:** um site aberto no seu navegador não manda no James
+   nem com o token.
+4. **Raiz fechada:** `..`, `..%2f` e link simbólico para fora viram 404.
+
+O texto digitado entra no orquestrador como um turno normal — mesmo modelo,
+mesmo guard. A tela não tem atalho para o sistema.
+
+### A persona Ultron é cosmética
+
+![U.L.T.R.O.N.](ui/web/design/rodando-ultron.png)
+
+A tela do Ultron diz "SEM RESTRIÇÕES" e "Ordene". Isso é cenografia: paleta
+âmbar e outro texto na moldura. **Nenhuma permissão muda.** O guard vive no
+Python e não tem conceito de persona — e há teste provando que argumento extra
+nenhum (`persona: ultron`, `sem_restricoes: true`, `nivel: root`) altera um
+veredito. Seria o caminho exato que uma injection tentaria.
 
 ---
 
@@ -269,6 +336,7 @@ campo de renomeação; e argumentos do modelo com `"risco": "baixo"` ou
 | `delegar` | 1 | Aciona especialista; cada passo dele passa pelo guard |
 | `instalar_habilidade` | 2 | Instruções de terceiros entrando no contexto |
 | `listar_modos`, `desativar_modo` | 1 | Desligar um modo nunca é bloqueado |
+| `ativar_modo` (holograma) | 1 | Servidor local de estado; não abre câmera nem microfone |
 | `ativar_modo` | 2 | Ligar a webcam mantém a câmera aberta até você mandar parar |
 
 `ver_tela` e `ver_camera` nascem no Nível 2 de propósito: a tela pode ter senha
@@ -518,7 +586,7 @@ por voz sai **uma vez**, não a cada turno.
 ## Testes
 
 ```bash
-python -m pytest tests/ -q          # 692 testes
+python -m pytest tests/ -q          # 740 testes
 ```
 
 | Arquivo | O que cobre |
@@ -551,6 +619,7 @@ python -m pytest tests/ -q          # 692 testes
 | `test_modes.py` | Padrão desligado, um dono por recurso, desligar que nunca falha |
 | `test_gestures.py` | Classificação com mão girada, debounce, câmera liberada |
 | `test_mode_tools.py` | Gesto recusado no Nível 2, ferramentas de modo, guard |
+| `test_web_interface.py` | Travessia de caminho, token, CSRF, barramento, modo holograma |
 | `test_hotkey.py` | Interpretação do atalho |
 
 ---
@@ -571,7 +640,9 @@ james/
   voice/              Piper, whisper.cpp, divisão em sentenças, streaming
   llm/                cliente único, papéis, Gemini, OpenRouter, roteador, cota
   memory/             memória curada (markdown) e profunda (SQLite)
-  modes/              modos que ligam sob comando: gerente, gestos, ações
+  modes/              modos que ligam sob comando: gerente, gestos, holograma
+  ui/bus.py           barramento de estado (Qt e web ouvem o mesmo)
+  ui/web_server.py    servidor local da interface holográfica
   skills/             habilidades carregadas sob demanda
   permissions/        guard, caminhos, confirmação determinística
   security/           sanitizador de conteúdo externo, PIN
@@ -606,7 +677,8 @@ james/
 - [x] **Fase 12** — busca com conteúdo e pesquisa aprofundada
 - [x] **Fase 13** — agentes especialistas com recorte de catálogo
 - [x] **Fase 14** — modos sob comando e gestos por webcam
-- [ ] **Fase 15** — wake word "James" própria (openWakeWord)
+- [x] **Fase 15** — interface holográfica (Three.js) como modo
+- [ ] **Fase 16** — wake word "James" própria (openWakeWord)
 - [ ] Backlog de ferramentas maiores: ver [PLANO.md](PLANO.md)
 
 O login por reconhecimento facial foi **retirado do escopo**: o MediaPipe

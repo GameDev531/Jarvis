@@ -49,6 +49,7 @@ from james.security.sanitizer import sanitize_external
 from james.state.ipc import IpcClient
 from james.state.runtime_state import RuntimeState
 from james.system_prompt import build_system_prompt, first_run_instruction, greeting_instruction
+from james.ui.bus import StateBus
 from james.tools import build_registry
 from james.ui import UiState, build_interface
 
@@ -57,6 +58,8 @@ logger = get_logger("james.orchestrator")
 _WAKE = "wake"
 _CANCEL = "cancel"
 _SHUTDOWN = "shutdown"
+# Comando digitado na interface holográfica; vem com o texto junto.
+_TEXT = "texto"
 
 # Teto de tempo de parede para uma gravação, mesmo que o VAD nunca conclua
 # (microfone mudo, driver travado).
@@ -88,7 +91,14 @@ class Orchestrator:
         # precisam do gerente, e um gesto precisa executar ferramentas. O nó se
         # desfaz com `_on_gesto`, que só resolve `self.gesture_actions` na hora
         # em que um gesto acontece — muito depois de ambos existirem.
-        self.modes = build_modes(config, on_acao=self._on_gesto)
+        self.bus = StateBus()
+        self.modes = build_modes(
+            config,
+            on_acao=self._on_gesto,
+            bus=self.bus,
+            on_comando=self._on_comando_digitado,
+            on_escutar=lambda: self._events.put(_WAKE),
+        )
         self.registry = build_registry(
             config,
             self.guard,
@@ -293,6 +303,7 @@ class Orchestrator:
         # Antes de qualquer outra coisa: soltar câmera e afins. Se o
         # encerramento falhar mais adiante, o hardware já está livre.
         self.modes.desligar_todos()
+        self.bus.close()
         if self.speaker is not None:
             self.speaker.stop()
         if self.player is not None:
@@ -369,6 +380,19 @@ class Orchestrator:
                 self._resume_wake()
                 self._cancelled.clear()
                 continue
+            if isinstance(event, tuple) and event[0] == _TEXT:
+                self._cancelled.clear()
+                try:
+                    self._set_ui(UiState.THINKING)
+                    self._process_transcript(event[1])
+                except NoProviderAvailable:
+                    self._degraded_turn()
+                except Exception:  # noqa: BLE001 — igual ao turno falado
+                    logger.exception("Erro no comando digitado.")
+                finally:
+                    self._set_ui(UiState.HIDDEN)
+                    self._publish_quota()
+                continue
             if event == _WAKE:
                 self._cancelled.clear()
                 try:
@@ -408,6 +432,15 @@ class Orchestrator:
             self._say("Não consegui entender, senhor.")
             return
 
+        self._process_transcript(transcript)
+
+    def _process_transcript(self, transcript: str) -> None:
+        """Daqui para baixo, comando falado e comando digitado são a mesma coisa.
+
+        É de propósito: o texto que chega da interface holográfica passa pelo
+        mesmo roteador, o mesmo modelo e o mesmo guard que uma ordem falada. A
+        tela não tem caminho curto para o sistema.
+        """
         logger.info("Comando: %s", transcript)
         audit("comando", texto=transcript)
         self._show_transcript("voce", transcript)
@@ -751,6 +784,7 @@ class Orchestrator:
                 self.interface.request_state.emit(state.value, degraded)
         if self.tray is not None:
             self.tray.set_state(state, degraded)
+        self.bus.publish(estado=state.value, degradado=degraded)
 
     def _progresso_do_plano(self, indice: int, total: int, rotulo: str) -> None:
         """Mostra em que passo a sequência está, sem falar em voz alta.
@@ -773,10 +807,39 @@ class Orchestrator:
     def _show_transcript(self, who: str, text: str) -> None:
         if self.interface is not None:
             self.interface.request_transcript.emit(who, text)
+        self.bus.publish(**({"transcricao": text} if who == "voce" else {"resposta": text}))
+
+    def _on_comando_digitado(self, texto: str) -> None:
+        """Texto vindo da interface web. Entra na fila como um turno qualquer."""
+        self._events.put((_TEXT, texto))
 
     def _publish_quota(self) -> None:
+        resumo = self.llm.quota_summary()
         if self.interface is not None:
-            self.interface.request_quota.emit(self.llm.quota_summary())
+            self.interface.request_quota.emit(resumo)
+        self.bus.publish(vitals=self._vitals(resumo))
+
+    def _vitals(self, cota: dict | None = None) -> dict:
+        """O que a barra superior da interface holográfica mostra.
+
+        Números reais ou nada: o desenho original simulava CPU com seno, o que
+        fica bonito e não informa. Se `psutil` não estiver instalado, o campo
+        some em vez de mostrar um valor inventado.
+        """
+        vitals: dict[str, str] = {}
+        try:
+            import psutil
+
+            vitals["CPU"] = f"{psutil.cpu_percent():.0f}%"
+            vitals["MEM"] = f"{psutil.virtual_memory().percent:.0f}%"
+        except Exception:  # noqa: BLE001 — telemetria nunca derruba um turno
+            pass
+        restante = sum((cota or {}).values()) if cota else None
+        if restante is not None:
+            vitals["COTA"] = str(restante)
+        modos = self.modes.ativos()
+        vitals["MODOS"] = ", ".join(modos) if modos else "—"
+        return vitals
 
     def _say(self, text: str) -> None:
         """Fala uma frase pronta do próprio James (não vinda do modelo)."""

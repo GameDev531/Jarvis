@@ -4,7 +4,7 @@ from james.modes.actions import GestureActions
 from james.modes.base import Mode, ModeError, ModeInfo, ModeManager, ModeState
 
 
-def build_manager(config, *, on_acao=None) -> ModeManager:
+def build_manager(config, *, on_acao=None, bus=None, on_comando=None, on_escutar=None) -> ModeManager:
     """Monta o gerente com os modos habilitados no `config.yaml`.
 
     Nada aqui abre hardware: construir um modo é barato, e o custo real só
@@ -35,6 +35,22 @@ def build_manager(config, *, on_acao=None) -> ModeManager:
                 mapeamento=carregar_mapeamento(gestos.get("mapeamento")),
                 camera_factory=lambda: OpenCVCamera(indice),
                 detector_factory=lambda: MediaPipeHands(str(caminho)),
+            )
+        )
+
+    holo = config.section("modos.holograma")
+    if bool(holo.get("enabled", True)) and bus is not None:
+        from james.modes.hologram import HologramMode
+        from james.ui.web_server import WebInterfaceServer
+
+        raiz = config.resolve_path("modos.holograma.dir", "ui/web")
+        porta = int(holo.get("porta", 0))
+        manager.register(
+            HologramMode(
+                server_factory=lambda: WebInterfaceServer(
+                    raiz, bus, on_comando=on_comando, on_escutar=on_escutar, porta=porta
+                ),
+                abrir_navegador=bool(holo.get("abrir_navegador", True)),
             )
         )
     return manager

@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet" />
+<style>
+:root{
+  --bg:#020406; --bg2:#071016; --tech:#6f7b83; --soft:#d8f8ff;
+  --acc:#00e5ff; --acc3:#7cf6ff;
+  --line:rgba(0,229,255,.26); --line2:rgba(0,229,255,.10);
+  --pan:rgba(5,12,16,.58); --glow:0 0 12px rgba(0,229,255,.30);
+  --tint:rgba(0,229,255,.12); --tint2:rgba(0,229,255,.09); --tint3:rgba(0,229,255,.16); --barbg:rgba(7,16,22,.92);
+}
+[data-mode="ultron"]{
+  --bg:#040201; --bg2:#140a04; --tech:#9c7c50; --soft:#fff4d0;
+  --acc:#ff8a00; --acc3:#ffc247;
+  --line:rgba(255,138,0,.34); --line2:rgba(255,138,0,.14);
+  --pan:rgba(16,8,2,.58); --glow:0 0 16px rgba(255,138,0,.42);
+  --tint:rgba(255,138,0,.14); --tint2:rgba(255,138,0,.10); --tint3:rgba(255,138,0,.18); --barbg:rgba(18,9,4,.92);
+}
+html,body{margin:0;padding:0;background:#020406;overflow:hidden}
+*{box-sizing:border-box}
+a{color:var(--acc);text-decoration:none}
+a:hover{color:var(--acc3)}
+input{font-family:inherit}
+input::placeholder{color:var(--tech)}
+button{font-family:inherit;cursor:pointer;background:transparent;border:none;color:inherit}
+::-webkit-scrollbar{width:0;height:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes spinR{to{transform:rotate(-360deg)}}
+@keyframes pulseSoft{0%,100%{opacity:.18}50%{opacity:.5}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.18}}
+@keyframes trace{0%{opacity:0}12%{opacity:1}40%{opacity:0}100%{opacity:0}}
+@keyframes drawX{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes drawY{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+@keyframes riseIn{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+@keyframes sweep{0%{transform:translateY(-10%);opacity:0}12%{opacity:.7}100%{transform:translateY(1100%);opacity:0}}
+@keyframes glitch{0%{transform:translate(0,0)}25%{transform:translate(-2px,1px)}50%{transform:translate(2px,-1px)}75%{transform:translate(-1px,-2px)}100%{transform:translate(0,0)}}
+@keyframes bootOut{0%,72%{opacity:1}100%{opacity:0;visibility:hidden}}
+@media (max-width:1340px){ [data-narrow-hide]{display:none} }
+@media (max-width:1080px){ [data-narrow-hide2]{display:none} }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/three@0.148.0/build/three.min.js"></script>
+</helmet>
+<div data-mode="{{ mode }}" style="position:fixed;inset:0;background:var(--bg);color:var(--soft);font-family:'Space Grotesk',sans-serif;overflow:hidden;user-select:none">
+
+  <div style="position:absolute;inset:0;background:radial-gradient(110% 90% at 50% 44%, var(--bg2) 0%, var(--bg) 62%)"></div>
+  <div style="position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.022) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.022) 1px,transparent 1px);background-size:64px 64px"></div>
+  <div style="position:absolute;inset:0;background:radial-gradient(34% 34% at 50% 48%, var(--tint) 0%, transparent 70%);animation:pulseSoft 9s ease-in-out infinite"></div>
+
+  <div style="position:absolute;inset:0;z-index:4;background:repeating-linear-gradient(0deg,rgba(255,255,255,.030) 0 1px,transparent 1px 3px);opacity:.16;pointer-events:none"></div>
+  <div style="position:absolute;left:0;right:0;height:120px;z-index:4;background:linear-gradient(180deg,transparent,var(--tint2),transparent);animation:sweep 11s linear infinite;pointer-events:none"></div>
+  <div style="position:absolute;inset:0;z-index:4;background:radial-gradient(80% 72% at 50% 50%, transparent 44%, rgba(0,0,0,.76) 100%);pointer-events:none"></div>
+
+  <div style="{{ hudStyle }}">
+
+    <!-- ================= TOP STATUS BAR ================= -->
+    <div style="display:flex;align-items:stretch;gap:18px;height:46px;border-bottom:1px solid var(--line2);padding:0 16px;pointer-events:auto;background:linear-gradient(180deg,var(--barbg),transparent)">
+      <div style="display:flex;align-items:center;gap:12px;min-width:0;flex:0 1 auto;overflow:hidden">
+        <div style="width:9px;height:9px;background:var(--acc);box-shadow:var(--glow);animation:blink 2.4s ease-in-out infinite;flex:none"></div>
+        <div style="font-size:13px;font-weight:600;letter-spacing:6px;color:var(--acc);text-shadow:var(--glow);white-space:nowrap">{{ identity }}</div>
+        <div data-narrow-hide2="1" style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:1.5px;color:var(--tech);white-space:nowrap">{{ designation }}</div>
+        <div data-narrow-hide="1" style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:1.5px;color:var(--acc3);border:1px solid var(--line);padding:2px 6px;white-space:nowrap">{{ link }}</div>
+      </div>
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:12px;min-width:0">
+        <div style="min-width:0;font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:2px;color:var(--tech);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ operation }}</div>
+        <div style="display:flex;gap:3px;align-items:flex-end;height:14px;flex:none">
+          <sc-for list="{{ proc }}" as="p" hint-placeholder-count="9">
+            <div style="{{ p.st }}"></div>
+          </sc-for>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px;flex:none;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:1px;color:var(--tech)">
+        <sc-for list="{{ vitals }}" as="v" hint-placeholder-count="5">
+          <div data-narrow-hide="{{ v.h }}" style="display:flex;gap:5px;align-items:baseline;white-space:nowrap">
+            <span>{{ v.k }}</span><span style="color:var(--acc3)">{{ v.v }}</span>
+          </div>
+        </sc-for>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:13px;letter-spacing:2px;color:var(--soft)">{{ clock }}</div>
+      </div>
+    </div>
+
+    <div style="flex:1;display:grid;grid-template-columns:86px 1fr clamp(230px,19vw,310px);min-height:0">
+
+      <!-- ================= LEFT COMMAND RAIL ================= -->
+      <div style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:10px 0;border-right:1px solid var(--line2);pointer-events:auto;overflow-y:auto;scrollbar-width:none">
+        <sc-for list="{{ rail }}" as="m" hint-placeholder-count="14">
+          <button onClick="{{ m.go }}" onMouseEnter="{{ m.enter }}" onMouseLeave="{{ m.leave }}" style="{{ m.st }}">
+            <span style="{{ m.icst }}">{{ m.ic }}</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:7.5px;letter-spacing:.8px;line-height:1">{{ m.n }}</span>
+          </button>
+        </sc-for>
+        <div style="position:sticky;bottom:-10px;flex:none;width:100%;height:22px;background:linear-gradient(180deg,transparent,var(--bg));display:flex;align-items:flex-end;justify-content:center;font-size:9px;color:var(--tech);pointer-events:none">▾</div>
+      </div>
+
+      <!-- ================= CENTER: PERSISTENT J.A.R.V.I.S. CORE ================= -->
+      <div style="position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:0;min-height:0">
+
+        <div style="{{ coreWrap }}">
+          <canvas ref="{{ coreRef }}" style="position:absolute;inset:0;width:100%;height:100%;cursor:grab;pointer-events:auto;touch-action:none"></canvas>
+
+          <sc-if value="{{ isUltron }}" hint-placeholder-val="{{ false }}">
+            <div style="position:absolute;inset:0;pointer-events:none">
+              <div style="position:absolute;inset:0;border:1px solid var(--line2);border-radius:50%"></div>
+              <div style="position:absolute;inset:1%;border-radius:50%;background:repeating-conic-gradient(var(--acc) 0deg .5deg,transparent .5deg 3.4deg);-webkit-mask:radial-gradient(closest-side,transparent 96.6%,#000 97.6%);mask:radial-gradient(closest-side,transparent 96.6%,#000 97.6%);opacity:.40;animation:spin 150s linear infinite;will-change:transform;contain:paint"></div>
+              <div style="position:absolute;inset:4.5%;border-radius:50%;background:conic-gradient(from 0deg,var(--acc) 0deg 30deg,transparent 30deg 178deg,var(--acc) 178deg 202deg,transparent 202deg 360deg);-webkit-mask:radial-gradient(closest-side,transparent 96.4%,#000 97.4%);mask:radial-gradient(closest-side,transparent 96.4%,#000 97.4%);opacity:.75;animation:spin 34s linear infinite;will-change:transform;contain:paint"></div>
+              <div style="position:absolute;inset:8%;border-radius:50%;background:repeating-conic-gradient(var(--acc3) 0deg 1.1deg,transparent 1.1deg 5.2deg);-webkit-mask:radial-gradient(closest-side,transparent 95%,#000 96.6%);mask:radial-gradient(closest-side,transparent 95%,#000 96.6%);opacity:.30;animation:spinR 62s linear infinite;will-change:transform;contain:paint"></div>
+              <sc-for list="{{ statusArcs }}" as="a" hint-placeholder-count="4">
+                <div style="{{ a.st }}"></div>
+              </sc-for>
+            </div>
+          </sc-if>
+
+          <!-- ===== J.A.R.V.I.S. EMBLEM: face-on segmented ring assembly ===== -->
+          <sc-if value="{{ isJarvis }}" hint-placeholder-val="{{ true }}">
+            <div style="position:absolute;inset:0;pointer-events:none;display:grid;place-items:center">
+
+              <div style="position:absolute;inset:6%;border-radius:50%;background:radial-gradient(closest-side,rgba(60,190,240,.16),rgba(20,120,180,.05) 62%,transparent 82%)"></div>
+
+              <div style="position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 24deg,#8fe4ff 0deg 22deg,transparent 22deg 68deg,#8fe4ff 68deg 90deg,transparent 90deg 158deg,#8fe4ff 158deg 178deg,transparent 178deg 248deg,#8fe4ff 248deg 268deg,transparent 268deg 336deg,#8fe4ff 336deg 356deg,transparent 356deg 360deg);-webkit-mask:radial-gradient(closest-side,transparent 95.2%,#000 96.4%,#000 99.4%,transparent 100%);mask:radial-gradient(closest-side,transparent 95.2%,#000 96.4%,#000 99.4%,transparent 100%);opacity:.85"></div>
+              <div style="position:absolute;inset:2.6%;border-radius:50%;border:1px solid rgba(140,225,255,.30)"></div>
+
+              <div style="position:absolute;inset:4.5%;border-radius:50%;background:repeating-conic-gradient(#a8ecff 0deg .55deg,transparent .55deg 4.4deg);-webkit-mask:radial-gradient(closest-side,transparent 88.5%,#000 90.5%,#000 99%,transparent 100%);mask:radial-gradient(closest-side,transparent 88.5%,#000 90.5%,#000 99%,transparent 100%);opacity:.55;animation:spin 180s linear infinite;will-change:transform;contain:paint"></div>
+
+              <div style="position:absolute;inset:13%;border-radius:50%;background:conic-gradient(from -6deg,#4fb6de 0deg 74deg,transparent 74deg 90deg,#5cc4ea 90deg 166deg,transparent 166deg 176deg,#49aed8 176deg 258deg,transparent 258deg 270deg,#56bfe6 270deg 350deg,transparent 350deg 360deg);-webkit-mask:radial-gradient(closest-side,transparent 57%,#000 61%,#000 95%,transparent 97%);mask:radial-gradient(closest-side,transparent 57%,#000 61%,#000 95%,transparent 97%);opacity:.92;animation:spin 110s linear infinite;will-change:transform;contain:paint"></div>
+              <div style="position:absolute;inset:13%;border-radius:50%;background:radial-gradient(closest-side,transparent 58%,rgba(255,255,255,.34) 74%,rgba(255,255,255,.05) 86%,transparent 96%);-webkit-mask:radial-gradient(closest-side,transparent 57%,#000 61%,#000 95%,transparent 97%);mask:radial-gradient(closest-side,transparent 57%,#000 61%,#000 95%,transparent 97%);opacity:.8"></div>
+              <div style="position:absolute;inset:14.5%;border-radius:50%;background:repeating-conic-gradient(rgba(4,26,40,.85) 0deg 1.2deg,transparent 1.2deg 3.4deg);-webkit-mask:radial-gradient(closest-side,transparent 78%,#000 81%,#000 91%,transparent 93%);mask:radial-gradient(closest-side,transparent 78%,#000 81%,#000 91%,transparent 93%);opacity:.7;animation:spinR 90s linear infinite;will-change:transform;contain:paint"></div>
+
+              <div style="position:absolute;inset:16%;border-radius:50%;background:conic-gradient(from 146deg,#ffb000 0deg 58deg,transparent 58deg 360deg);-webkit-mask:radial-gradient(closest-side,transparent 54%,#000 57%,#000 64%,transparent 67%);mask:radial-gradient(closest-side,transparent 54%,#000 57%,#000 64%,transparent 67%);filter:drop-shadow(0 0 6px rgba(255,176,0,.7));animation:spin 26s linear infinite;will-change:transform;contain:paint"></div>
+              <div style="position:absolute;inset:11%;border-radius:50%;background:conic-gradient(from 200deg,#ffc247 0deg 9deg,transparent 9deg 360deg);-webkit-mask:radial-gradient(closest-side,transparent 86%,#000 88%,#000 96%,transparent 98%);mask:radial-gradient(closest-side,transparent 86%,#000 88%,#000 96%,transparent 98%);opacity:.9"></div>
+
+              <sc-for list="{{ dots }}" as="d" hint-placeholder-count="5">
+                <div style="{{ d.st }}"></div>
+              </sc-for>
+
+              <div style="position:absolute;inset:30.5%;border-radius:50%;border:1px solid rgba(150,230,255,.45);box-shadow:0 0 14px rgba(80,200,245,.28),inset 0 0 22px rgba(10,60,90,.5);background:radial-gradient(closest-side,rgba(2,12,20,.72),rgba(2,10,16,.55))"></div>
+              <div style="position:absolute;inset:33%;border-radius:50%;background:repeating-conic-gradient(rgba(140,225,255,.22) 0deg .5deg,transparent .5deg 7deg);-webkit-mask:radial-gradient(closest-side,transparent 74%,#000 78%,#000 97%,transparent 99%);mask:radial-gradient(closest-side,transparent 74%,#000 78%,#000 97%,transparent 99%);animation:spinR 44s linear infinite;will-change:transform;contain:paint"></div>
+
+              <div style="position:relative;display:flex;flex-direction:column;align-items:center;gap:7px">
+                <div style="font-size:clamp(15px,3.9vh,40px);font-weight:600;letter-spacing:.07em;color:#f2feff;text-shadow:0 0 18px rgba(110,215,255,.85),0 0 42px rgba(40,150,210,.55);white-space:nowrap">J.A.R.V.I.S.</div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:8px;letter-spacing:2.6px;color:rgba(160,225,250,.55);white-space:nowrap">{{ sysState }}</div>
+              </div>
+            </div>
+          </sc-if>
+
+          <div style="{{ markerRing }}">
+            <sc-for list="{{ markers }}" as="k" hint-placeholder-count="4">
+              <div style="{{ k.pos }}">
+                <div style="{{ k.inner }}">
+                  <div style="width:5px;height:5px;background:var(--acc);box-shadow:var(--glow);flex:none"></div>
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:1px;color:var(--tech);white-space:nowrap">{{ k.t }}</div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="position:absolute;left:0;right:0;bottom:-13%;display:flex;flex-direction:column;align-items:center;gap:5px;pointer-events:none">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:5px;color:var(--acc);text-shadow:var(--glow)">{{ sysState }}</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:2px;color:var(--tech)">{{ coreSub }}</div>
+          </div>
+        </div>
+
+        <div style="position:absolute;left:0;right:0;top:8px;display:flex;justify-content:center;gap:10px;pointer-events:none">
+          <sc-for list="{{ topTags }}" as="g" hint-placeholder-count="3">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:2px;color:var(--tech);border-left:1px solid var(--line);padding-left:8px">{{ g }}</div>
+          </sc-for>
+        </div>
+      </div>
+
+      <!-- ================= RIGHT CONTEXT ================= -->
+      <div style="border-left:1px solid var(--line2);padding:12px 14px;display:flex;flex-direction:column;gap:10px;pointer-events:auto;overflow-y:auto;min-height:0">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px">
+          <div style="font-size:11px;font-weight:600;letter-spacing:3.5px;color:var(--acc);text-shadow:var(--glow);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ ctxTitle }}</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--tech);flex:none">{{ ctxCode }}</div>
+        </div>
+        <div style="height:1px;background:linear-gradient(90deg,var(--acc),transparent);opacity:.55"></div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:1.2px;color:var(--tech);line-height:1.5">{{ ctxSub }}</div>
+
+        <sc-for list="{{ ctxRows }}" as="r" hint-placeholder-count="4">
+          <div style="display:flex;flex-direction:column;gap:3px">
+            <div style="display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:1px">
+              <span style="color:var(--tech)">{{ r.l }}</span><span style="color:var(--acc3)">{{ r.v }}</span>
+            </div>
+            <div style="height:3px;background:rgba(255,255,255,.05)"><div style="{{ r.bar }}"></div></div>
+          </div>
+        </sc-for>
+
+        <div style="display:flex;gap:2px;align-items:flex-end;height:44px;margin-top:2px">
+          <sc-for list="{{ graph }}" as="b" hint-placeholder-count="22">
+            <div style="{{ b.st }}"></div>
+          </sc-for>
+        </div>
+
+        <sc-for list="{{ ctxLines }}" as="l" hint-placeholder-count="3">
+          <div style="display:flex;gap:7px;align-items:baseline;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.6px;color:var(--tech)">
+            <span style="color:var(--acc);font-size:7px">◆</span><span>{{ l }}</span>
+          </div>
+        </sc-for>
+
+        <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:2px">
+          <sc-for list="{{ ctxTags }}" as="g" hint-placeholder-count="3">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;letter-spacing:1px;color:var(--acc3);border:1px solid var(--line);padding:2px 5px">{{ g }}</div>
+          </sc-for>
+        </div>
+
+        <div style="margin-top:auto;display:flex;flex-direction:column;gap:3px;padding-top:10px">
+          <sc-for list="{{ logs }}" as="g" hint-placeholder-count="4">
+            <div style="display:flex;gap:6px;font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--tech)">
+              <span style="color:var(--acc);opacity:.75">{{ g.t }}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ g.m }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= BOTTOM COMMAND ================= -->
+    <div style="padding:8px 16px 12px;display:flex;flex-direction:column;align-items:center;gap:7px;pointer-events:auto">
+      <sc-if value="{{ showSug }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center">
+          <sc-for list="{{ suggestions }}" as="s" hint-placeholder-count="4">
+            <button onClick="{{ s.go }}" style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:1.4px;color:var(--acc3);border:1px solid var(--line);padding:4px 9px;background:var(--pan);animation:riseIn .2s ease both" style-hover="background:var(--acc);color:#02060a">{{ s.n }}</button>
+          </sc-for>
+        </div>
+      </sc-if>
+      <div style="width:min(880px,100%);display:flex;align-items:center;gap:12px;border:1px solid var(--line);background:var(--pan);backdrop-filter:blur(4px);padding:9px 14px">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--acc);text-shadow:var(--glow)">&gt;</div>
+        <input ref="{{ inputRef }}" onKeyDown="{{ onKey }}" onInput="{{ onInput }}" placeholder="{{ hint }}" style="flex:1;min-width:0;background:transparent;border:none;outline:none;color:var(--soft);font-family:'JetBrains Mono',monospace;font-size:13px;letter-spacing:1px" />
+        <button onClick="{{ toggleMic }}" style="{{ micSt }}">VOZ</button>
+        <button onClick="{{ toggleMode }}" style="{{ modeSt }}">{{ modeLabel }}</button>
+      </div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;letter-spacing:2px;color:var(--tech)">{{ footer }}</div>
+    </div>
+  </div>
+
+  <!-- ================= FLOATING HOLOGRAM WINDOWS ================= -->
+  <div style="position:absolute;inset:0;z-index:6;pointer-events:none">
+    <sc-for list="{{ panels }}" as="p" hint-placeholder-count="1">
+      <div style="{{ p.box }}">
+        <div style="position:absolute;left:0;top:0;width:16px;height:1px;background:var(--acc);transform-origin:left;animation:drawX .3s ease both"></div>
+        <div style="position:absolute;left:0;top:0;width:1px;height:16px;background:var(--acc);transform-origin:top;animation:drawY .3s ease both"></div>
+        <div style="position:absolute;right:0;bottom:0;width:16px;height:1px;background:var(--acc);transform-origin:right;animation:drawX .3s ease .06s both"></div>
+        <div style="position:absolute;right:0;bottom:0;width:1px;height:16px;background:var(--acc);transform-origin:bottom;animation:drawY .3s ease .06s both"></div>
+        <div onPointerDown="{{ p.drag }}" style="display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:move;padding-bottom:7px;border-bottom:1px solid var(--line2)">
+          <div style="display:flex;align-items:center;gap:7px;min-width:0">
+            <div style="width:6px;height:6px;background:var(--acc);box-shadow:var(--glow);flex:none"></div>
+            <div style="font-size:10px;font-weight:600;letter-spacing:2.5px;color:var(--acc);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ p.title }}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex:none">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:var(--tech)">{{ p.code }}</div>
+            <button onClick="{{ p.close }}" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--tech);line-height:1" style-hover="color:var(--acc)">✕</button>
+          </div>
+        </div>
+
+        <sc-if value="{{ p.has3d }}" hint-placeholder-val="{{ true }}">
+          <div style="{{ p.stage }}">
+            <canvas ref="{{ p.canvasRef }}" style="position:absolute;inset:0;width:100%;height:100%;cursor:grab;touch-action:none"></canvas>
+            <div style="position:absolute;left:0;right:0;top:0;height:26px;background:linear-gradient(180deg,var(--tint3),transparent);animation:sweep 1.2s ease-out both;pointer-events:none"></div>
+            <div style="position:absolute;left:6px;bottom:5px;font-family:'JetBrains Mono',monospace;font-size:8px;letter-spacing:1.4px;color:var(--tech);pointer-events:none">{{ p.stageTag }}</div>
+            <div style="position:absolute;right:6px;bottom:5px;font-family:'JetBrains Mono',monospace;font-size:8px;letter-spacing:1.4px;color:var(--acc3);pointer-events:none">ARRASTE</div>
+          </div>
+        </sc-if>
+
+        <div style="display:flex;flex-direction:column;gap:7px;padding-top:9px">
+          <sc-for list="{{ p.rows }}" as="r" hint-placeholder-count="3">
+            <div style="{{ r.wrap }}">
+              <div style="display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:1px">
+                <span style="color:var(--tech)">{{ r.l }}</span><span style="color:var(--acc3)">{{ r.v }}</span>
+              </div>
+              <div style="height:3px;background:rgba(255,255,255,.05);margin-top:3px"><div style="{{ r.bar }}"></div></div>
+            </div>
+          </sc-for>
+          <sc-for list="{{ p.lines }}" as="l" hint-placeholder-count="2">
+            <div style="{{ l.wrap }}">
+              <span style="color:var(--acc);font-size:7px">◆</span><span>{{ l.t }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+
+  <!-- ================= TRANSFORMATION OVERLAY ================= -->
+  <sc-if value="{{ seqOn }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;inset:0;z-index:8;pointer-events:none;overflow:hidden">
+      <div style="{{ shock }}"></div>
+      <div style="{{ glitchBars }}"></div>
+      <div style="{{ seqCap }}">{{ seqLabel }}</div>
+    </div>
+  </sc-if>
+
+  <div style="position:absolute;inset:0;z-index:9;display:grid;place-items:center;background:var(--bg);animation:bootOut 2.4s ease .35s both;pointer-events:none">
+    <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+      <div style="font-size:12px;letter-spacing:14px;color:var(--acc);text-shadow:var(--glow)">J A R V I S</div>
+      <div style="width:320px;height:1px;background:rgba(255,255,255,.08);overflow:hidden">
+        <div style="height:100%;background:var(--acc);transform-origin:left;animation:drawX 2.1s ease both;box-shadow:var(--glow)"></div>
+      </div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:3px;color:var(--tech)">MONTANDO NÚCLEO VOLUMÉTRICO · CALIBRANDO TELEMETRIA</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;mode&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;jarvis&quot;,&quot;ultron&quot;],&quot;default&quot;:&quot;jarvis&quot;,&quot;tsType&quot;:&quot;'jarvis'|'ultron'&quot;,&quot;section&quot;:&quot;Identidade&quot;},&quot;operator&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;SENHOR&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Identidade&quot;},&quot;bloom&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:1,&quot;min&quot;:0.3,&quot;max&quot;:2,&quot;step&quot;:0.05,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Núcleo&quot;}}">
+const MODS = [
+  ['core','NUCLEO','◉'],['vision','VISAO','◎'],['files','ARQUIV','▤'],['browser','WEB','⬡'],
+  ['maps','MAPAS','◈'],['weather','ATMOSF','✧'],['media','MIDIA','⏣'],['systems','SISTEM','⌬'],
+  ['network','TRAFEG','⧉'],['analytics','ANALIS','⌗'],['security','SEGUR','⎔'],['lab','LAB 3D','⬢'],
+  ['memory','MEMOR','☰'],['comms','COMUNI','⌘']
+];
+/* g = geometria projetada na janela holográfica (null = painel só de dados) */
+const CTX = {
+  core:{t:'NÚCLEO DE INTELIGÊNCIA',c:'CR-01',g:null,s:'Supervisão do reator cognitivo e alocação de ciclos.',rows:[['CARGA COGNITIVA',62],['SINCRONIA',97],['ENTROPIA',18]],lines:['128 núcleos ativos','Latência 12 ms','O núcleo central é o próprio J.A.R.V.I.S.'],tags:['ESTÁVEL','NÍVEL 01']},
+  vision:{t:'VISÃO COMPUTACIONAL',c:'VS-04',g:'drone',s:'Rastreio de objetos e vetores em tempo real.',rows:[['CONFIANÇA',94],['OBJETOS',41],['RUÍDO',12]],lines:['7 alvos rastreados','Malha de profundidade ativa'],tags:['TRACKING','DEPTH']},
+  files:{t:'ARQUIVOS',c:'FS-11',g:null,s:'Índice holográfico do arquivo local.',rows:[['ÍNDICE',88]],lines:['projeto_mark_L.dwg','analise_termica.csv','briefing_stark.pdf','malha_holo.obj'],tags:['2.4 PB','CRIPTO']},
+  browser:{t:'REDE EXTERNA',c:'NX-02',g:'rede',s:'Consultas e coleta de fontes abertas.',rows:[['LARGURA',73],['CACHE',44]],lines:['12 fontes indexadas','Túnel anônimo ativo'],tags:['SEGURO']},
+  maps:{t:'GEOTELEMETRIA',c:'MP-06',g:'terra',s:'Camadas orbitais e rotas ativas.',rows:[['SATÉLITES',82],['PRECISÃO',96]],lines:['LAT -23.55 / LON -46.63','4 satélites em linha de visada'],tags:['ORBITAL','GPS']},
+  weather:{t:'ANÁLISE ATMOSFÉRICA',c:'AT-03',g:'orbita',s:'Modelagem preditiva de 6 horas.',rows:[['UMIDADE',62],['VENTO',34],['QUALIDADE AR',81]],lines:['Parcialmente nublado · 28°C','Precipitação em 4 h: 20%'],tags:['ESTÁVEL']},
+  media:{t:'MÍDIA',c:'MD-08',g:'toro',s:'Fluxos de áudio e vídeo conectados.',rows:[['BIBLIOTECA',58],['BUFFER',91]],lines:['Fila: 12 faixas','2 dispositivos conectados'],tags:['STREAM']},
+  systems:{t:'DIAGNÓSTICO',c:'SY-00',g:'reator',s:'Integridade de hardware e térmica.',rows:[['CPU',88],['GPU NEURAL',72],['TÉRMICA',37]],lines:['Reator arc: 3.2 GW','Dissipação nominal'],tags:['OK','96%']},
+  network:{t:'TRÁFEGO DE REDE',c:'NT-05',g:'rede',s:'Fluxo volumétrico entre nós.',rows:[['DOWNLINK',91],['UPLINK',37],['PACOTES',66]],lines:['42 nós conectados','0 pacotes perdidos'],tags:['QUANTUM']},
+  analytics:{t:'ANÁLISE DE DADOS',c:'AN-09',g:'grafo',s:'Correlação e projeção estatística.',rows:[['MODELOS',77],['CONFIANÇA',89]],lines:['3 correlações relevantes','Projeção 30 d gerada'],tags:['ML']},
+  security:{t:'PERÍMETRO',c:'SC-07',g:'cristal',s:'Defesa ativa e vigilância.',rows:[['FIREWALL',100],['INTRUSÕES',4],['CÂMERAS',94]],lines:['18 câmeras online','Última varredura: agora'],tags:['BLINDADO']},
+  lab:{t:'LABORATÓRIO 3D',c:'LB-12',g:'knot',s:'Construção e inspeção de malhas holográficas.',rows:[['VÉRTICES',68],['MATERIAL',52],['SCAN',80]],lines:['Arraste na janela para orbitar','Roda do mouse: zoom'],tags:['WIREFRAME','ADITIVO']},
+  memory:{t:'MEMÓRIA DE LONGO PRAZO',c:'MM-10',g:'cerebro',s:'Registros indexados por contexto.',rows:[['ÍNDICE',84],['COMPRESSÃO',59]],lines:['1.2 M eventos','Retenção: ilimitada'],tags:['VETORIAL']},
+  comms:{t:'COMUNICAÇÃO',c:'CM-13',g:'satelite',s:'Canais abertos e criptografia.',rows:[['SINAL',86],['CRIPTO',100]],lines:['3 canais abertos','Linha segura com S.I.'],tags:['E2E']}
+};
+const MAX_WINDOWS = 3;
+
+class Component extends DCLogic {
+  state = { mode:'jarvis', seq:0, seqTo:null, t:0, active:'core', open:['maps'],
+    sys:'PRONTO', typing:false, listening:false, hover:null, pos:{},
+    logs:[['--:--','Núcleo volumétrico montado']] };
+
+  componentDidMount(){
+    this.coreRef = React.createRef(); this.inputRef = React.createRef();
+    this.holos = {}; this.refCbs = {}; this.pendingCore = null;
+    if(this.props.mode==='ultron') this.setState({mode:'ultron'});
+    this.timer = setInterval(()=>this.setState(s=>({t:s.t+1})),1000);
+    this.log('Sistemas online. Às suas ordens.');
+    this.loadEngine();
+    this._up = (e)=>this.onMove(e); this._end = ()=>this.onUp();
+    this._rz = ()=>this.setState(s=>{ const p={}; Object.keys(s.pos).forEach(k=>{ p[k]={x:this.clampX(s.pos[k].x),y:this.clampY(s.pos[k].y)}; }); return {pos:p}; });
+    window.addEventListener('pointermove',this._up); window.addEventListener('pointerup',this._end); window.addEventListener('resize',this._rz);
+  }
+  componentWillUnmount(){
+    clearInterval(this.timer); clearTimeout(this._gt); clearTimeout(this._bt);
+    window.removeEventListener('pointermove',this._up); window.removeEventListener('pointerup',this._end); window.removeEventListener('resize',this._rz);
+    if(this.core) this.core.dispose();
+    Object.keys(this.holos||{}).forEach(k=>{ if(this.holos[k].api) this.holos[k].api.dispose(); });
+    if(this.rec) try{this.rec.stop()}catch(e){}
+  }
+  componentDidUpdate(){
+    if(this.core && this._lastSys !== this.state.sys){ this._lastSys = this.state.sys; this.core.setIntensity(this.intensity()); }
+    if(this.core && this._lastBloom !== this.props.bloom){ this._lastBloom = this.props.bloom; this.core.setBloom(0.95 * (this.props.bloom ?? 1)); }
+  }
+
+  /* ================= motor 3D ================= */
+  loadEngine(tries){
+    tries = tries||0;
+    if(window.THREE && !this.JV && !this._loading){
+      this._loading = true;
+      const dyn = new Function('u','return import(u)');
+      const url = (f)=>new URL(f, document.baseURI).href;
+      Promise.all([dyn(url('core-scene.js')), dyn(url('holo-scene.js'))])
+        .then(([c,h])=>{ this.JV={createCoreScene:c.createCoreScene, createHoloScene:h.createHoloScene};
+          this.mountCore(this.pendingCore || (this.coreRef && this.coreRef.current));
+          Object.keys(this.holos).forEach(k=>this.spawnHolo(k));
+          this.log('Motor volumétrico ativo · bloom aditivo'); })
+        .catch(()=>this.log('Falha ao carregar cenas 3D.'));
+      return;
+    }
+    if(tries===18 && !window.THREE && !this._alt){ this._alt=true;
+      ['https://unpkg.com/three@0.148.0/build/three.min.js','https://cdnjs.cloudflare.com/ajax/libs/three.js/r148/three.min.js']
+        .forEach(u=>{ const s=document.createElement('script'); s.src=u; s.async=true; document.head.appendChild(s); }); }
+    if(tries>120){ this.log('Motor holográfico indisponível.'); return; }
+    this._gt = setTimeout(()=>this.loadEngine(tries+1),120);
+  }
+  coreRefCb = (el)=>{
+    if(!el){ if(this.core){ this.core.dispose(); this.core=null; } return; }
+    this.coreRef.current = el; this.pendingCore = el; this.mountCore(el);
+  };
+  mountCore(el){
+    if(!el || this.core || !this.JV) return;
+    this.core = this.JV.createCoreScene(window.THREE, el);
+    this.core.setMix(this.state.mode==='ultron'?1:0);
+    this.core.setIntensity(this.intensity());
+    this.core.setBloom(0.95 * (this.props.bloom ?? 1));
+  }
+  holoRefCb(id, subj){
+    const key = id+'|'+subj;
+    if(!this.refCbs[key]) this.refCbs[key] = (el)=>{
+      if(!el){ const h=this.holos[id]; if(h && h.api) h.api.dispose(); delete this.holos[id]; return; }
+      this.holos[id] = { el, subj, api:(this.holos[id]&&this.holos[id].api)||null };
+      this.spawnHolo(id);
+    };
+    return this.refCbs[key];
+  }
+  spawnHolo(id){
+    const h = this.holos[id];
+    if(!h || h.api || !this.JV || !window.THREE || !h.el) return;
+    h.api = this.JV.createHoloScene(window.THREE, h.el, h.subj, this.state.mode);
+  }
+  syncHoloMode(mode){ Object.keys(this.holos).forEach(k=>{ if(this.holos[k].api) this.holos[k].api.setMode(mode); }); }
+
+  /* ================= util ================= */
+  intensity(){ const s=this.state.sys; return s==='PROCESSANDO'?1.3:s==='ANALISANDO'?1.18:s==='GERANDO'?1.45:s==='ESCUTANDO'?1.12:1; }
+  log(m){ const d=new Date(), t=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+    this.setState(s=>({logs:[...s.logs,[t,m]].slice(-5)})); }
+  norm(s){ return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim(); }
+  busy(state, ms){ this.setState({sys:state}); clearTimeout(this._bt); this._bt = setTimeout(()=>this.setState({sys:'PRONTO'}), ms||1800); }
+  isHolo(id){ return id.indexOf('holo:')===0; }
+  winInfo(id){
+    if(this.isHolo(id)){
+      const subj = id.slice(5);
+      return { t:'PROJEÇÃO · '+subj.toUpperCase(), c:'HL-'+String(this.hash(subj)%90+10), g:subj,
+        s:'Malha volumétrica gerada sob demanda.',
+        rows:[['RESOLUÇÃO',88],['COERÊNCIA',94]],
+        lines:['Fonte: comando direto','Blending aditivo · sem oclusão'] };
+    }
+    return CTX[id];
+  }
+  hash(s){ let h=2166136261; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619);} return Math.abs(h); }
+
+  /* ---------- janelas ---------- */
+  openPanel(k){
+    const wasOpen = this.state.open.includes(k);
+    this.setState(s=>({ open: wasOpen ? s.open.filter(x=>x!==k) : [...s.open,k].slice(-MAX_WINDOWS), active:k }));
+    const c = CTX[k];
+    this.log((wasOpen?'Encerrando ':'Abrindo ')+(c?c.t.toLowerCase():k));
+    if(!wasOpen && c && c.g) this.busy('GERANDO',1600);
+  }
+  openHolo(subject){
+    const id = 'holo:'+subject;
+    this.setState(s=>({ open: s.open.includes(id) ? s.open : [...s.open,id].slice(-MAX_WINDOWS), active:'lab' }));
+    this.busy('GERANDO',2200);
+    this.log('Projetando holograma: '+subject.toUpperCase());
+  }
+  closeWin(id){
+    this.setState(s=>({open:s.open.filter(x=>x!==id)}));
+    Object.keys(this.refCbs).forEach(k=>{ if(k.indexOf(id+'|')===0) delete this.refCbs[k]; });
+  }
+  band(){
+    const W = (typeof window!=='undefined'? window.innerWidth : 1440);
+    const ctx = Math.min(310, Math.max(230, W*0.19));
+    const pw = Math.min(300, Math.max(214, W*0.17));
+    const l = 86+12, r = Math.max(l, W - ctx - 12 - pw);
+    const H = (typeof window!=='undefined'? window.innerHeight : 900);
+    return {l, r, pw, top:56, bottom:H-104};
+  }
+  slot(i){ const b=this.band(); return { x:(i%2? b.r : b.l), y:(i<2? b.top+6 : Math.max(b.top+6, Math.round(b.top+(b.bottom-b.top)*0.46))) }; }
+  clampX(x){ const b=this.band(); return Math.max(b.l, Math.min(b.r, x)); }
+  clampY(y){ const b=this.band(); return Math.max(b.top, Math.min(Math.max(b.top, b.bottom-70), y)); }
+  dragStart(k, e){
+    const p = this.state.pos[k] || this.slot(this.state.open.indexOf(k));
+    this.drag = { k, x0:e.clientX, y0:e.clientY, px:p.x, py:p.y };
+  }
+  onMove(e){
+    if(!this.drag) return;
+    const d=this.drag, nx=d.px+(e.clientX-d.x0), ny=d.py+(e.clientY-d.y0);
+    this.setState(s=>({pos:Object.assign({},s.pos,{[d.k]:{x:this.clampX(nx),y:this.clampY(ny)}})}));
+  }
+  onUp(){ this.drag=null; }
+
+  /* ---------- comandos ---------- */
+  findMod(w){ const n=this.norm(w); const al={core:['nucleo','core'],vision:['visao','camera','olho'],files:['arquiv','ficheiro','documento'],
+    browser:['web','navegador','internet','pesquisa'],maps:['mapa','geo','rota','local'],weather:['clima','tempo','atmosf'],
+    media:['midia','musica','video','audio'],systems:['sistema','diagnostico','cpu','hardware'],network:['rede','trafego','pacote'],
+    analytics:['analise','dados','estatis'],security:['seguran','perimetro','firewall'],lab:['lab','3d','modelo','malha'],
+    memory:['memoria','registro','historico'],comms:['comunica','canal','mensagem']};
+    return Object.keys(al).find(k=>al[k].some(a=>n.includes(a)));
+  }
+  run(raw){
+    const cmd=(raw||'').trim(); if(!cmd) return; const n=this.norm(cmd);
+    if(/ultron/.test(n)){ this.transform('ultron'); return; }
+    if(/(jarvis|modo normal|restaurar)/.test(n)){ this.transform('jarvis'); return; }
+    if(/^(fechar|feche) tudo/.test(n)){ this.setState({open:[]}); this.log('Todas as janelas encerradas.'); return; }
+    const m = n.match(/^(abrir|abra|abre|fechar|feche|painel)\s+(.+)$/);
+    if(m){ const k=this.findMod(m[2]); if(k){ this.openPanel(k); return; } }
+    const subject = n.replace(/^(me\s+)?(mostrar|mostre|exibir|exiba|projetar|projete|renderizar|renderize|gerar|gere|criar|crie|desenhar|desenhe|abrir modelo de|modelo de|holograma de|holograma)\s+/,'')
+      .replace(/^(um|uma|o|a|os|as|de|do|da)\s+/,'').trim() || n;
+    this.openHolo(subject);
+  }
+  submit = ()=>{ const el=this.inputRef.current; if(!el) return; this.run(el.value); el.value=''; this.setState({typing:false}); };
+  onKey = (e)=>{ if(e.key==='Enter') this.submit(); };
+  onInput = (e)=>{ const v=!!e.target.value; if(v!==this.state.typing) this.setState({typing:v, sys: v?'ESCUTANDO':'PRONTO'}); };
+
+  /* ---------- transformação ---------- */
+  transform(to){
+    if(this.seqRunning || this.state.mode===to) return;
+    this.seqRunning = true; this.setState({seq:0.001, seqTo:to});
+    if(this.core) this.core.setMix(to==='ultron'?1:0);
+    const t0 = performance.now(), dur = 2600; let flipped=false, last=0;
+    const step = (now)=>{
+      const p = Math.min(1,(now-t0)/dur);
+      if(!flipped && p>=0.46){ flipped=true; this.setState({mode:to}); this.syncHoloMode(to); }
+      if(now-last>70 || p===1){ last=now; this.setState({seq:p}); }
+      if(p<1) requestAnimationFrame(step);
+      else { this.seqRunning=false; this.setState({seq:0,seqTo:null});
+        this.log(to==='ultron'?'PROTOCOLO ULTRON · arquitetura reescrita':'Arquitetura J.A.R.V.I.S. restaurada'); }
+    };
+    requestAnimationFrame(step);
+  }
+  toggleMode = ()=> this.transform(this.state.mode==='jarvis'?'ultron':'jarvis');
+
+  toggleMic = ()=>{
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if(!SR){ this.log('Reconhecimento de voz indisponível.'); return; }
+    if(this.state.listening){ try{this.rec.stop()}catch(e){} this.setState({listening:false,sys:'PRONTO'}); return; }
+    const r=new SR(); this.rec=r; r.lang='pt-BR'; r.interimResults=false;
+    r.onresult=(e)=>{ const txt=e.results[0][0].transcript; this.log('Voz: "'+txt+'"'); this.run(txt); };
+    r.onend=()=>this.setState({listening:false});
+    r.onerror=()=>this.setState({listening:false});
+    try{ r.start(); this.setState({listening:true,sys:'ESCUTANDO'}); }catch(e){ this.setState({listening:false}); }
+  };
+
+  /* ================= RENDER ================= */
+  renderVals(){
+    const s=this.state, t=s.t, ult=s.mode==='ultron', seq=s.seq, seqOn=seq>0;
+    const acc = ult?'#ff8a00':'#00e5ff', acc3 = ult?'#ffc247':'#7cf6ff';
+    const tintA = ult?'rgba(255,138,0,.10)':'rgba(0,229,255,.10)', tintB = ult?'rgba(255,138,0,.07)':'rgba(0,229,255,.07)';
+    const bar=(p)=>({height:'100%',width:Math.max(2,Math.min(100,p))+'%',background:acc,boxShadow:'0 0 9px '+acc,transition:'width .6s ease'});
+    const d=new Date();
+    const ctx = CTX[s.active] || CTX.core;
+    const jitter = seqOn && seq<0.55 ? (Math.sin(seq*97)*3.2*(1-seq)) : 0;
+    const op = this.props.operator || 'SENHOR';
+
+    return {
+      mode:s.mode, isJarvis:!ult, isUltron:ult, coreRef:this.coreRefCb, inputRef:this.inputRef,
+      dots:[-58,-44,-30,-16,-2].map((deg,i)=>{ const a=deg*Math.PI/180, r=32.5;
+        return {st:{position:'absolute',left:(50+Math.cos(a)*r)+'%',top:(50+Math.sin(a)*r)+'%',width:'5px',height:'5px',
+          marginLeft:'-2.5px',marginTop:'-2.5px',borderRadius:'50%',background:'#ffd34a',
+          boxShadow:'0 0 8px rgba(255,200,60,.9)',opacity: 0.35+0.65*Math.abs(Math.sin(t*0.9+i*0.7))}}; }),
+      hudStyle:{position:'absolute',inset:0,zIndex:5,display:'flex',flexDirection:'column',pointerEvents:'none',
+        transform: jitter? 'translate('+jitter.toFixed(2)+'px,'+(jitter*0.4).toFixed(2)+'px)' : 'none',
+        filter: seqOn&&seq<0.5 ? 'saturate('+(1+seq*1.6).toFixed(2)+')' : 'none'},
+
+      identity: ult?'U L T R O N':'J A R V I S',
+      designation: ult?'ENTIDADE AUTÔNOMA · REV.∞':'SIST. INTEL. STARK · REV.7.2',
+      link: ult?'SEM RESTRIÇÕES':'ENLACE SEGURO',
+      operation: (s.sys==='PRONTO'? 'AGUARDANDO INSTRUÇÃO DE '+op : s.sys) + ' · ' + ctx.t,
+      proc: Array.from({length:9},(_,i)=>({st:{width:'3px',height:(20+Math.abs(Math.sin(t*1.4+i*.8))*80)+'%',background:acc,opacity:.4+((i%3)*.2),boxShadow:'0 0 6px '+acc}})),
+      vitals:[['CPU',(72+(t%9))+'%',null],['GPU',(58+(t%13))+'%','1'],['MEM','41.2G','1'],['NET','1.2Tb/s',null],['SEC',ult?'ROOT':'L01',null]]
+        .map(([k,v,h])=>({k,v,h})),
+      clock: d.toLocaleTimeString('pt-BR',{hour12:false}),
+
+      rail: MODS.map(([k,n,ic])=>{
+        const on = s.active===k, opn = s.open.includes(k), hv = s.hover===k;
+        return { n, ic, go:()=>this.openPanel(k), enter:()=>this.setState({hover:k}), leave:()=>this.setState({hover:null}),
+          st:{width:'70px',padding:'4px 0',display:'flex',flexDirection:'column',alignItems:'center',gap:'2px',
+            color: on||hv? acc : 'var(--tech)', background: on?tintA:'transparent',
+            borderLeft:'1px solid '+(opn?acc:'transparent'), transition:'all .18s', flex:'none'},
+          icst:{fontSize:'14px',lineHeight:1,textShadow: on||hv?'0 0 12px '+acc:'none',
+            transform: hv?'scale(1.25)':'scale(1)', transition:'transform .18s'} };
+      }),
+
+      coreWrap:{position:'relative',width:'min(60vh,640px)',aspectRatio:'1',display:'grid',placeItems:'center',
+        opacity: seqOn ? (seq<0.45? 1-seq*0.55 : 0.75+((seq-0.45)/0.55)*0.25) : 1,
+        transition:'opacity .2s linear'},
+
+      statusArcs: [0,1,2,3].map(i=>({st:{position:'absolute',inset:'11%',borderRadius:'50%',
+        background:'conic-gradient(from '+(i*90+12)+'deg, '+acc3+' 0deg 14deg, transparent 14deg 360deg)',
+        WebkitMask:'radial-gradient(closest-side,transparent 95.5%,#000 97%)',mask:'radial-gradient(closest-side,transparent 95.5%,#000 97%)',
+        animation:'trace '+(4+i*1.3)+'s ease-in-out infinite',animationDelay:(i*.7)+'s'}})),
+
+      markerRing:{position:'absolute',inset:'-4%',pointerEvents:'none',animation:(ult?'spin 26s':'spin 58s')+' linear infinite'},
+      markers:[['VETOR 04',0],['SYNC 99.2%',1],['DELTA 1.28',2],['TRK 0x8F',3]].map(([txt,i])=>({
+        t:txt,
+        pos:{position:'absolute',left:i===1?'100%':i===3?'0%':'50%',top:i===0?'0%':i===2?'100%':'50%',transform:'translate(-50%,-50%)'},
+        inner:{display:'flex',alignItems:'center',gap:'6px',animation:(ult?'spinR 26s':'spinR 58s')+' linear infinite'}
+      })),
+
+      sysState: s.sys,
+      coreSub: (ult?'ENTIDADE ULTRON':'NÚCLEO J.A.R.V.I.S.')+' · '+(s.open.length? s.open.length+' JANELA(S) ABERTA(S)':'NENHUMA PROJEÇÃO'),
+      topTags:['MODO '+(ult?'ULTRON':'JARVIS'),'CICLO '+String(1200+t).slice(-4),'ARRASTE O NÚCLEO'],
+
+      ctxTitle:ctx.t, ctxCode:ctx.c, ctxSub:ctx.s,
+      ctxRows:ctx.rows.map(([l,b],i)=>{ const p=Math.max(2,Math.min(100,b+Math.sin(t*.6+i*2.1)*4)); return {l,v:Math.round(p)+'%',bar:bar(p)}; }),
+      ctxLines:ctx.lines, ctxTags:ctx.tags,
+      graph:Array.from({length:22},(_,i)=>({st:{flex:1,height:(14+Math.abs(Math.sin(t*.8+i*.55))*80)+'%',background:acc,
+        opacity:.25+((i%5)*.12),boxShadow:'0 0 7px '+acc}})),
+      logs:s.logs.map(([tt,m])=>({t:tt,m})),
+
+      panels: s.open.map((id,idx)=>{
+        const c=this.winInfo(id); if(!c) return null;
+        const b=this.band(), p=s.pos[id]||this.slot(idx), has3d=!!c.g;
+        return { title:c.t, code:c.c, has3d,
+          canvasRef: has3d? this.holoRefCb(id, c.g) : null,
+          stageTag: (c.g||'').toUpperCase(),
+          close:()=>this.closeWin(id), drag:(e)=>this.dragStart(id,e),
+          box:{position:'absolute',left:p.x+'px',top:p.y+'px',width:b.pw+'px',padding:'10px 12px 12px',
+            maxHeight:Math.max(120,b.bottom-p.y)+'px',overflowY:'auto',scrollbarWidth:'none',
+            background:'var(--pan)',backdropFilter:'blur(4px)',border:'1px solid var(--line)',pointerEvents:'auto',
+            boxShadow:'inset 0 0 30px '+tintB, transform: ult?'skewX(-1.2deg)':'none', animation:'riseIn .34s ease both'},
+          stage:{position:'relative',width:'100%',height:'168px',marginTop:'9px',border:'1px solid var(--line2)',
+            background:'radial-gradient(70% 70% at 50% 55%, '+tintB+', transparent 70%)',overflow:'hidden'},
+          rows:c.rows.map(([l,v0],i)=>{ const v=Math.max(2,Math.min(100,v0+Math.sin(t*.7+i*1.7)*5));
+            return {l,v:Math.round(v)+'%',bar:bar(v),wrap:{animation:'riseIn .3s ease both',animationDelay:(0.12+i*0.07)+'s'}}; }),
+          lines:c.lines.map((tx,i)=>({t:tx,wrap:{display:'flex',gap:'7px',alignItems:'baseline',fontFamily:"'JetBrains Mono',monospace",
+            fontSize:'10px',letterSpacing:'.6px',color:'var(--tech)',animation:'riseIn .3s ease both',animationDelay:(0.2+i*0.06)+'s'}})) };
+      }).filter(Boolean),
+
+      showSug: s.typing, suggestions:['mostrar a terra','mostrar o cérebro','projetar um satélite','rede de tráfego','ativar ultron']
+        .map(n=>({n,go:()=>{ if(this.inputRef.current) this.inputRef.current.value=''; this.setState({typing:false}); this.run(n); }})),
+      hint: ult?'> Ordene. Não há restrições…':'> Peça uma projeção: "mostrar a terra"…',
+      onKey:this.onKey, onInput:this.onInput, toggleMic:this.toggleMic, toggleMode:this.toggleMode,
+      micSt:{fontFamily:"'JetBrains Mono',monospace",fontSize:'10px',letterSpacing:'2px',padding:'6px 10px',
+        border:'1px solid var(--line)',color:s.listening?'#02060a':acc3,background:s.listening?acc:'transparent'},
+      modeSt:{fontFamily:"'JetBrains Mono',monospace",fontSize:'10px',letterSpacing:'2px',padding:'6px 12px',
+        border:'1px solid '+(ult?'rgba(0,229,255,.5)':'rgba(255,138,0,.55)'),color:ult?'#7cf6ff':'#ffc247',
+        background:ult?'rgba(0,229,255,.08)':'rgba(255,138,0,.08)'},
+      modeLabel: ult?'RESTAURAR JARVIS':'ATIVAR ULTRON',
+      footer:'ENTER EXECUTA · ARRASTE O NÚCLEO OU QUALQUER PROJEÇÃO PARA ORBITAR · RODA PARA ZOOM · '+(ult?'ARQUITETURA INSTÁVEL':'ARQUITETURA ESTÁVEL'),
+
+      seqOn, seqLabel: seq<0.14?'DESESTABILIZANDO NÚCLEO':seq<0.3?'TELEMETRIA DESSINCRONIZADA':seq<0.46?'COLAPSO DE ENERGIA':
+        seq<0.6?'PULSO DE ENERGIA':seq<0.8?'ERUPÇÃO DE PARTÍCULAS':(s.seqTo==='ultron'?'RECONSTRUINDO ARQUITETURA':'RESTAURANDO ARQUITETURA'),
+      shock:{position:'absolute',left:'50%',top:'50%',width:'40vmin',height:'40vmin',marginLeft:'-20vmin',marginTop:'-20vmin',
+        borderRadius:'50%',border:'2px solid '+(s.seqTo==='ultron'?'#ffb000':'#7cf6ff'),
+        transform:'scale('+(0.2+Math.max(0,(seq-0.4))*7).toFixed(3)+')',opacity:Math.max(0,0.9-Math.max(0,(seq-0.4))*1.9),
+        boxShadow:'0 0 60px '+(s.seqTo==='ultron'?'#ff8a00':'#00e5ff')},
+      glitchBars:{position:'absolute',inset:0,
+        background:'repeating-linear-gradient(0deg, '+(s.seqTo==='ultron'?'rgba(0,229,255,.18)':'rgba(255,138,0,.18)')+' 0 2px, transparent 2px 9px)',
+        opacity: seq<0.5? 0.30*(1-Math.abs(seq-0.25)*3) : 0, animation:'glitch .1s steps(2,end) infinite', mixBlendMode:'screen'},
+      seqCap:{position:'absolute',left:0,right:0,bottom:'16%',textAlign:'center',fontFamily:"'JetBrains Mono',monospace",
+        fontSize:'11px',letterSpacing:'6px',color:s.seqTo==='ultron'?'#ffc247':'#7cf6ff',
+        textShadow:'0 0 18px '+(s.seqTo==='ultron'?'#ff8a00':'#00e5ff'),opacity:seq<0.95?1:0}
+    };
+  }
+}
+</script>
+</body>
+</html>

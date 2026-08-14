@@ -230,6 +230,22 @@ modos:
       v: mudo
       apontar: ""
 
+  holograma:
+    enabled: true
+    # A interface volumétrica (Three.js) roda no NAVEGADOR, em outro processo.
+    # É de propósito: o bloom aditivo é carga contínua de GPU, e dentro do
+    # processo do James ela disputaria CPU com o pipeline de voz — que é a
+    # única coisa que não pode engasgar. No navegador, se travar você fecha a
+    # aba e o James nem percebe.
+    #
+    #   "Jarvis, ativa o holograma"     abre a interface
+    #   "Jarvis, desativa o holograma"  derruba o servidor
+    #
+    # A janela Qt comum continua sendo o padrão — funciona em qualquer máquina.
+    dir: ui/web
+    porta: 0                 # 0 = o sistema escolhe uma porta livre
+    abrir_navegador: true    # false = o James só diz a URL, você abre quando quiser
+
 office:
   # Onde salvar apresentações e planilhas. Precisa estar em permissions.folders.
   # Vazio = usa a primeira pasta permitida.
