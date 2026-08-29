@@ -95,3 +95,31 @@ def test_chave_vazia_conta_como_ausente(tmp_path, monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     load_env(tmp_path)
     assert get_secret("GEMINI_API_KEY") is None
+
+
+# ================================================ isolamento da suíte
+
+def test_a_suite_nao_enxerga_chave_de_api():
+    """A fixture `sem_credenciais` (autouse, em conftest.py) está de pé?
+
+    Um teste de "sem provedor disponível" passava em quem não tinha as chaves
+    configuradas e falhava em quem tinha — porque isolava a config e esquecia o
+    ambiente. Se esta fixture sumir, essa classe de falha volta, e volta como
+    "funciona na minha máquina".
+
+    Vale também como trava de segurança: com a chave visível, um erro na suíte
+    gastaria cota real ou mandaria dados para a nuvem sem ninguém pedir.
+    """
+    import os
+
+    for nome in ("GEMINI_API_KEY", "OPENROUTER_API_KEY", "PORCUPINE_ACCESS_KEY"):
+        assert os.environ.get(nome) is None, (
+            f"{nome} está visível para a suíte. A fixture autouse "
+            "`sem_credenciais` em tests/conftest.py deveria ter limpado."
+        )
+
+
+def test_um_teste_pode_definir_a_propria_chave(monkeypatch):
+    """O isolamento não pode impedir quem precisa de uma chave de verdade."""
+    monkeypatch.setenv("GEMINI_API_KEY", "chave-do-proprio-teste")
+    assert get_secret("GEMINI_API_KEY") == "chave-do-proprio-teste"
