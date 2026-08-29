@@ -209,15 +209,59 @@ class Config:
         return result
 
 
+def _parse_env(texto: str) -> dict[str, str]:
+    """Leitor de .env em 15 linhas: `CHAVE=valor`, com # de comentário.
+
+    Existe para o caso em que o `python-dotenv` não está instalado. Sem ele, a
+    versão antiga simplesmente não carregava nada — e o efeito era cruel: as
+    chaves estavam no arquivo, o James dizia "GEMINI_API_KEY ausente", e não
+    havia pista nenhuma ligando uma coisa à outra.
+
+    Um assistente que depende de chave não pode ter o carregamento dela
+    condicionado a uma dependência opcional dar certo.
+    """
+    valores: dict[str, str] = {}
+    for linha in texto.splitlines():
+        linha = linha.strip()
+        if not linha or linha.startswith("#") or "=" not in linha:
+            continue
+        if linha.startswith("export "):
+            linha = linha[len("export "):]
+        chave, _, valor = linha.partition("=")
+        chave = chave.strip()
+        if not chave:
+            continue
+        valor = valor.strip()
+        # Aspas são opcionais no formato; quem escreve à mão costuma usá-las.
+        if len(valor) >= 2 and valor[0] == valor[-1] and valor[0] in "\"'":
+            valor = valor[1:-1]
+        valores[chave] = valor
+    return valores
+
+
 def load_env(root: Path | None = None) -> None:
     """Carrega o .env, se existir. Sem .env o James ainda sobe (modo degradado)."""
+    env_path = (root or PROJECT_ROOT) / ".env"
+    if not env_path.exists():
+        return
+
     try:
         from dotenv import load_dotenv
     except ImportError:
-        return
-    env_path = (root or PROJECT_ROOT) / ".env"
-    if env_path.exists():
+        pass
+    else:
         load_dotenv(env_path, override=False)
+        return
+
+    try:
+        conteudo = env_path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    # `setdefault`, para casar com o `override=False` acima: uma variável já
+    # definida no ambiente real ganha do arquivo. É o que permite trocar uma
+    # chave por um turno sem editar o .env.
+    for chave, valor in _parse_env(conteudo).items():
+        os.environ.setdefault(chave, valor)
 
 
 def load_config(path: str | Path | None = None) -> Config:
