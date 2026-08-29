@@ -19,6 +19,9 @@
  * está no Python, não aqui.
  */
 
+import * as THREE from 'three';
+import { GLTFLoader } from './vendor/GLTFLoader.js';
+
 const MODS = [
   ['core', 'NUCLEO', '◉'], ['vision', 'VISAO', '◎'], ['files', 'ARQUIV', '▤'], ['browser', 'WEB', '⬡'],
   ['maps', 'MAPAS', '◈'], ['weather', 'ATMOSF', '✧'], ['media', 'MIDIA', '⏣'], ['systems', 'SISTEM', '⌬'],
@@ -328,6 +331,7 @@ class App {
     // trilha
     for (const [k] of MODS) {
       const b = this.railBtns[k];
+      if (!b) continue;
       b.classList.toggle('on', this.active === k);
       b.classList.toggle('open', this.open.includes(k));
     }
@@ -407,6 +411,7 @@ class App {
         const canvas = el('canvas', { style: 'position:absolute;inset:0;width:100%;height:100%;cursor:grab;touch-action:none' });
         box.append(el('div', { class: 'stage' }, canvas,
           el('div', { class: 'mono', style: 'position:absolute;left:6px;bottom:5px;font-size:8px;letter-spacing:1.4px;color:var(--tech);pointer-events:none' }, c.g.toUpperCase()),
+          el('div', { class: 'mono credito', style: 'position:absolute;left:6px;top:5px;font-size:7.5px;letter-spacing:1px;color:var(--tech);opacity:.75;pointer-events:none;max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }),
           el('div', { class: 'mono', style: 'position:absolute;right:6px;bottom:5px;font-size:8px;letter-spacing:1.4px;color:var(--acc3);pointer-events:none' }, 'ARRASTE')));
         this.spawnHolo(k, canvas, c.g);
       }
@@ -447,10 +452,10 @@ class App {
 
   async mountCore() {
     const canvas = this.$canvas;
-    if (!window.THREE || !canvas) { this.log('Three.js indisponível — HUD sem núcleo 3D.'); return; }
+    if (!canvas) return;
     try {
       const { createCoreScene } = await import('./core-scene.js');
-      this.core = createCoreScene(window.THREE, canvas);
+      this.core = createCoreScene(THREE, canvas);
       this.log('Motor volumétrico ativo · bloom aditivo');
     } catch (err) {
       this.log('Falha ao montar o núcleo 3D.');
@@ -459,11 +464,35 @@ class App {
   }
 
   async spawnHolo(k, canvas, subject) {
-    if (!window.THREE) return;
     try {
       const { createHoloScene } = await import('./holo-scene.js');
-      this.holos[k] = createHoloScene(window.THREE, canvas, subject, this.mode);
+      this.holos[k] = createHoloScene(THREE, GLTFLoader, canvas, subject, this.mode, {
+        cache: './models',
+        // Cada resolução conta de onde o objeto veio. É o que deixa visível,
+        // no próprio log da interface, qual nível da cascata respondeu.
+        aoRegistrar: (nivel, detalhe) => this.registrarFonte(k, nivel, detalhe),
+        aoMontar: (info) => this.creditar(k, info),
+      });
     } catch (err) { console.error(err); }
+  }
+
+  /* De onde veio o objeto — aparece no log lateral. */
+  registrarFonte(chave, nivel, detalhe) {
+    const rotulos = {
+      catalogo: 'catálogo', cache: 'cache local', remoto: 'baixado',
+      generico: 'forma genérica', cache_falhou: 'cache falhou',
+      remoto_falhou: 'download falhou',
+    };
+    this.log(`${chave}: ${rotulos[nivel] || nivel}${detalhe ? ` (${detalhe})` : ''}`);
+  }
+
+  /* CC-BY exige crédito. O rodapé da janela já existe: é onde ele cabe. */
+  creditar(chave, info) {
+    const box = document.querySelector(`.win[data-key="${chave}"] .credito`);
+    if (!box) return;
+    box.textContent = info.autor
+      ? `${info.autor}${info.licenca ? ` · ${info.licenca}` : ''}`
+      : (info.fonte === 'catalogo' ? 'PROCEDURAL' : '');
   }
 
   /* -------------------------------------------------------- ligação James */
@@ -495,7 +524,42 @@ class App {
     if (d.transcricao) this.log(`Você: "${d.transcricao}"`);
     if (d.resposta) this.log(d.resposta);
     if (d.log) this.log(d.log);
+    if (d.holograma) this.projetar(d.holograma);
+    if (d.holograma_fechar) this.fecharProjecoes();
     this.paint();
+  }
+
+  /* "Jarvis, mostra um cérebro" chega aqui pelo SSE.
+   *
+   * Assuntos livres viram uma janela `projecao:<assunto>`, fora do catálogo
+   * fixo de módulos — assim o modelo pode pedir qualquer coisa sem que alguém
+   * tenha que cadastrar um módulo antes. */
+  projetar({ assunto, titulo }) {
+    const texto = String(assunto || '').trim();
+    if (!texto) return;
+    const chave = `projecao:${norm(texto)}`;
+
+    CTX[chave] = {
+      t: (titulo || texto).toUpperCase().slice(0, 34),
+      c: 'PRJ', g: texto,
+      s: 'Projeção volumétrica sob demanda.',
+      rows: [], lines: [], tags: ['HOLOGRAMA'],
+    };
+    if (!this.open.includes(chave)) {
+      this.open = [...this.open, chave].slice(-MAX_WINDOWS);
+    }
+    this.active = chave;
+    this.log(`Projetando: ${texto}`);
+    this.renderWindows();
+  }
+
+  fecharProjecoes() {
+    const antes = this.open.length;
+    this.open = this.open.filter((k) => !k.startsWith('projecao:'));
+    if (this.open.length !== antes) {
+      this.log('Projeções encerradas.');
+      this.renderWindows();
+    }
   }
 
   async submit() {

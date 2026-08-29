@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 15 implementadas. 740 testes automatizados.
+**Estado atual:** Fases 0 a 16 implementadas. 761 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -186,6 +186,95 @@ veredito. Seria o caminho exato que uma injection tentaria.
 
 ---
 
+## Projeção holográfica
+
+![Catálogo](ui/web/design/catalogo-holografico.png)
+
+```
+"Jarvis, mostra um cérebro"     abre uma janela de projeção
+"Jarvis, fecha as projeções"    fecha todas
+```
+
+Precisa do modo holograma ligado. Se não estiver, o James avisa em vez de o
+pedido sumir em silêncio.
+
+### A cascata
+
+```
+"mostra um cérebro"
+   ↓
+1. CATÁLOGO CURADO   gerador escrito à mão     0 ms · offline · sem licença
+   ↓ não cobre
+2. CACHE LOCAL       GLB já baixado antes      disco · offline
+   ↓ não tem
+3. REMOTO            busca → baixa → cacheia   1x na vida
+   ↓ falhou / sem rede
+4. GENÉRICO          forma abstrata pela palavra   nunca falha
+```
+
+O nível 4 é o que garante que a tela nunca fica vazia: pedir "mostra um
+ornitorrinco" sem internet devolve uma forma abstrata, não um erro. E ela é
+**determinística** — a mesma palavra dá sempre a mesma forma, senão o holograma
+pareceria instável em vez de desconhecido.
+
+O nível 3 está construído (com os tetos abaixo) mas dormente: falta plugar a
+fonte. A Poly Pizza é a candidata — CC0/CC-BY, chave estática, low-poly.
+
+### Por que gerar em vez de baixar
+
+Contraintuitivo, e é o ponto todo: **um holograma não quer o modelo bom, quer o
+modelo limpo.** O shader lê silhueta e topologia e joga fora textura, cor e
+material. Uma malha fotogrametrada de 60 MB fica *pior* que uma de 200 KB — a
+triangulação irregular suja as scanlines e as normais ruidosas mancham o
+fresnel. Geometria procedural é limpa por construção, e não tem autor a
+creditar.
+
+Os 14 assuntos do catálogo somam de 144 a 3.043 vértices cada. Um scan
+equivalente teria centenas de milhares.
+
+### O material
+
+`holo-material.js`, quatro camadas que só convencem somadas:
+
+| Camada | Por quê |
+|---|---|
+| **Fresnel** | A borda brilha mais que o meio — leitura de "sólido de luz" |
+| **Scanlines** | Calculadas no espaço do **mundo**: o objeto gira, as listras ficam |
+| **Glitch** | Em rajadas, não contínuo — tremor constante vira ruído e cansa |
+| **Aditivo** | Luz soma; o fundo aparece através sem ordenar transparência |
+
+### GLB remoto é dado não confiável
+
+Carregar modelo baixado é rodar um parser em cima de arquivo de terceiro. Os
+tetos em `LIMITES` (`holo-resolver.js`):
+
+- **8 MB** — conferido no `Content-Length` **e** de novo no buffer, porque
+  servidor pode mentir no cabeçalho ou omiti-lo
+- **250.000 vértices** e **400 objetos** — depois de parsear
+- **15 s** de espera
+- **GLB auto-contido apenas** — sem `resourcePath`, o loader não sai buscando
+  `.bin` nem textura solta na rede
+
+Estourou qualquer um: descarta e cai para o nível seguinte. Recusar e desenhar
+outra coisa é sempre melhor que travar a aba.
+
+O cache fica em `state/models/`, **fora** de `ui/web/`: conteúdo baixado não se
+mistura com código versionado, e assim um modelo chamado `app.js` nunca pode
+sobrescrever a interface. Há teste para exatamente isso.
+
+### Página de conferência
+
+```
+http://127.0.0.1:<porta>/teste.html
+```
+
+Abre sem o James rodando e sem chave nenhuma. Mostra os 14 assuntos numa grade,
+conta os vértices de cada um, mede os FPS, e tem botões para conferir o
+fallback genérico e os tetos de segurança. **FPS abaixo de 15 aqui significa
+que o modo holograma vai pesar nesta máquina.**
+
+---
+
 ## Comece pela Fase 0
 
 ```bash
@@ -337,6 +426,7 @@ campo de renomeação; e argumentos do modelo com `"risco": "baixo"` ou
 | `instalar_habilidade` | 2 | Instruções de terceiros entrando no contexto |
 | `listar_modos`, `desativar_modo` | 1 | Desligar um modo nunca é bloqueado |
 | `ativar_modo` (holograma) | 1 | Servidor local de estado; não abre câmera nem microfone |
+| `projetar_holograma`, `fechar_hologramas` | 1 | Desenha numa tela local; fechar a janela desfaz |
 | `ativar_modo` | 2 | Ligar a webcam mantém a câmera aberta até você mandar parar |
 
 `ver_tela` e `ver_camera` nascem no Nível 2 de propósito: a tela pode ter senha
@@ -586,7 +676,7 @@ por voz sai **uma vez**, não a cada turno.
 ## Testes
 
 ```bash
-python -m pytest tests/ -q          # 740 testes
+python -m pytest tests/ -q          # 761 testes
 ```
 
 | Arquivo | O que cobre |
@@ -620,6 +710,7 @@ python -m pytest tests/ -q          # 740 testes
 | `test_gestures.py` | Classificação com mão girada, debounce, câmera liberada |
 | `test_mode_tools.py` | Gesto recusado no Nível 2, ferramentas de modo, guard |
 | `test_web_interface.py` | Travessia de caminho, token, CSRF, barramento, modo holograma |
+| `test_holograma.py` | Ferramenta de projeção, cache de modelos, tetos, GLB gerado |
 | `test_hotkey.py` | Interpretação do atalho |
 
 ---
@@ -678,7 +769,8 @@ james/
 - [x] **Fase 13** — agentes especialistas com recorte de catálogo
 - [x] **Fase 14** — modos sob comando e gestos por webcam
 - [x] **Fase 15** — interface holográfica (Three.js) como modo
-- [ ] **Fase 16** — wake word "James" própria (openWakeWord)
+- [x] **Fase 16** — projeção holográfica: shader, catálogo curado e cascata
+- [ ] **Fase 17** — wake word "James" própria (openWakeWord)
 - [ ] Backlog de ferramentas maiores: ver [PLANO.md](PLANO.md)
 
 O login por reconhecimento facial foi **retirado do escopo**: o MediaPipe

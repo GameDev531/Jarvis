@@ -11,7 +11,7 @@ from james.tools.registry import Tool, ToolRegistry, ToolResult
 
 
 def build_registry(
-    config, guard, memory=None, facts=None, skills=None, modes=None
+    config, guard, memory=None, facts=None, skills=None, modes=None, bus=None
 ) -> ToolRegistry:
     """Monta o catálogo completo. Cada módulo registra as suas."""
     from james.tools import (
@@ -48,6 +48,11 @@ def build_registry(
         from james.tools import modes as mode_tools
 
         mode_tools.register(registry, config, guard, modes)
+
+    if bus is not None:
+        from james.tools import holograma
+
+        holograma.register(registry, config, guard, bus, modes)
 
     # Por último: sequência e delegação consultam o catálogo — a primeira
     # para validar os passos, a segunda para montar os recortes por perfil.

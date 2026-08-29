@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>James — teste do catálogo holográfico</title>
+<!--
+  Página de conferência visual. Abre sem o James rodando e sem chave nenhuma:
+  é o jeito mais rápido de ver se o shader e o catálogo estão de pé nesta
+  máquina, e de medir os quadros por segundo antes de ligar o modo de verdade.
+
+  Uma cena só, com todos os objetos numa grade — e não um canvas por objeto.
+  O navegador tem teto de contextos WebGL (por volta de 16), e catorze canvases
+  encostariam nesse teto só para desenhar miniatura.
+-->
+<style>
+  :root { --acc:#7cf6ff; --tech:#6f7b83; }
+  html,body{margin:0;background:#020406;color:#d8f8ff;overflow:hidden;
+    font-family:'Space Grotesk','Segoe UI',system-ui,sans-serif}
+  canvas{position:fixed;inset:0;width:100%;height:100%}
+  .hud{position:fixed;inset:0;pointer-events:none;padding:14px 18px;
+    display:flex;flex-direction:column;justify-content:space-between}
+  .top{display:flex;gap:18px;align-items:baseline}
+  h1{font-size:13px;letter-spacing:5px;color:var(--acc);margin:0;font-weight:600}
+  .mono{font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;
+    font-size:10px;letter-spacing:1.4px;color:var(--tech)}
+  .fps{color:var(--acc)}
+  .bad{color:#ff5f56}
+  .ok{color:#5fdc7a}
+  .barra{pointer-events:auto;display:flex;gap:8px;flex-wrap:wrap}
+  button{pointer-events:auto;font-family:inherit;font-size:10px;letter-spacing:1.6px;
+    background:transparent;color:var(--acc);border:1px solid rgba(124,246,255,.3);
+    padding:5px 11px;cursor:pointer}
+  button:hover{background:rgba(124,246,255,.12)}
+  #relatorio{max-height:38vh;overflow:auto;pointer-events:auto}
+  #relatorio div{margin:1px 0}
+</style>
+</head>
+<body>
+<canvas id="palco"></canvas>
+<div class="hud">
+  <div>
+    <div class="top">
+      <h1>TESTE DO CATÁLOGO</h1>
+      <span class="mono">FPS <span class="fps" id="fps">—</span></span>
+      <span class="mono" id="resumo">carregando…</span>
+    </div>
+  </div>
+  <div>
+    <div class="mono" id="relatorio"></div>
+    <div class="barra" style="margin-top:10px">
+      <button id="btn-cor">TROCAR PARA ULTRON</button>
+      <button id="btn-generico">TESTAR ASSUNTO DESCONHECIDO</button>
+      <button id="btn-limites">TESTAR OS TETOS DE SEGURANÇA</button>
+    </div>
+    <div class="mono" style="margin-top:8px;opacity:.6">
+      arraste para orbitar · roda do mouse para aproximar
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { createHolographicMaterial, CORES } from './holo-material.js';
+import { ASSUNTOS, criarDoCatalogo, resolverAssunto } from './holo-catalog.js';
+import { criarGenerico, carregarGLB, LIMITES, slug } from './holo-resolver.js';
+import { GLTFLoader } from './vendor/GLTFLoader.js';
+
+const relatorio = document.getElementById('relatorio');
+const linha = (texto, classe = '') => {
+  const d = document.createElement('div');
+  d.innerHTML = texto;
+  if (classe) d.className = classe;
+  relatorio.append(d);
+  relatorio.scrollTop = relatorio.scrollHeight;
+};
+
+const canvas = document.getElementById('palco');
+const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
+const cena = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 200);
+const material = createHolographicMaterial(THREE, { hologramColor: CORES.jarvis });
+const relogio = new THREE.Clock();
+
+/* ---- monta a grade com todos os assuntos do catálogo ---- */
+const colunas = 5, espaco = 2.6;
+const grade = new THREE.Group();
+cena.add(grade);
+
+let falhas = 0;
+ASSUNTOS.forEach((nome, i) => {
+  try {
+    const g = criarDoCatalogo(THREE, nome, material);
+    if (!g) throw new Error('gerador devolveu null');
+    let vertices = 0;
+    g.traverse((o) => { if (o.isMesh) vertices += o.geometry.attributes.position.count; });
+    g.position.set(
+      ((i % colunas) - (colunas - 1) / 2) * espaco,
+      -Math.floor(i / colunas) * espaco + espaco,
+      0,
+    );
+    grade.add(g);
+
+    const rotulo = document.createElement('div');
+    linha(`<span class="ok">✓</span> ${nome} — ${vertices} vértices`);
+  } catch (erro) {
+    falhas += 1;
+    linha(`<span class="bad">✗</span> ${nome} — ${erro.message}`, 'bad');
+  }
+});
+
+document.getElementById('resumo').textContent =
+  `${ASSUNTOS.length - falhas}/${ASSUNTOS.length} assuntos · ${falhas ? 'COM FALHA' : 'todos de pé'}`;
+
+/* ---- botões de verificação ---- */
+let ultron = false;
+document.getElementById('btn-cor').onclick = (e) => {
+  ultron = !ultron;
+  material.setColor(ultron ? CORES.ultron : CORES.jarvis);
+  e.target.textContent = ultron ? 'VOLTAR PARA JARVIS' : 'TROCAR PARA ULTRON';
+  linha(`cor trocada para ${ultron ? 'ultron (âmbar)' : 'jarvis (ciano)'}`);
+};
+
+document.getElementById('btn-generico').onclick = () => {
+  const palavra = 'ornitorrinco';
+  const a = criarGenerico(THREE, palavra, material);
+  const b = criarGenerico(THREE, palavra, material);
+  const mesmaForma =
+    a.children[0].geometry.type === b.children[0].geometry.type;
+  linha(
+    resolverAssunto(palavra) === null
+      ? `<span class="ok">✓</span> "${palavra}" não está no catálogo → caiu no genérico`
+      : `<span class="bad">✗</span> "${palavra}" não deveria estar no catálogo`,
+  );
+  linha(
+    mesmaForma
+      ? `<span class="ok">✓</span> genérico é determinístico (mesma palavra, mesma forma)`
+      : `<span class="bad">✗</span> genérico mudou entre chamadas`,
+  );
+  a.position.set(0, espaco * 2, 0);
+  grade.add(a);
+};
+
+document.getElementById('btn-limites').onclick = async () => {
+  // Um "servidor" falso que responde um arquivo grande demais, para provar que
+  // o teto corta ANTES de o parser rodar.
+  const enorme = new Blob([new Uint8Array(LIMITES.bytes + 1024)]);
+  const url = URL.createObjectURL(enorme);
+  try {
+    await carregarGLB(THREE, GLTFLoader, url, material);
+    linha(`<span class="bad">✗</span> teto de tamanho NÃO barrou um arquivo grande`, 'bad');
+  } catch (erro) {
+    linha(`<span class="ok">✓</span> teto de tamanho barrou: ${erro.message}`);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+
+  try {
+    await carregarGLB(THREE, GLTFLoader, './models/nao-existe.glb', material);
+    linha(`<span class="bad">✗</span> modelo inexistente não deveria carregar`, 'bad');
+  } catch (erro) {
+    linha(`<span class="ok">✓</span> modelo ausente recusado: ${erro.message}`);
+  }
+
+  linha(`<span class="ok">✓</span> slug("Ré/../etc") = "${slug('Ré/../etc')}"`);
+};
+
+/* ---- laço ---- */
+let quadros = 0, marca = performance.now();
+camera.position.set(0, -1.4, 14);
+(function laco() {
+  requestAnimationFrame(laco);
+  const l = canvas.clientWidth, a = canvas.clientHeight;
+  if (l && a) {
+    renderer.setSize(l, a, false);
+    camera.aspect = l / a;
+    camera.updateProjectionMatrix();
+  }
+  const delta = relogio.getDelta();
+  material.update(delta);
+  grade.children.forEach((g, i) => { g.rotation.y += delta * (0.3 + (i % 3) * 0.1); });
+  renderer.render(cena, camera);
+
+  quadros += 1;
+  const agora = performance.now();
+  if (agora - marca >= 1000) {
+    const fps = Math.round((quadros * 1000) / (agora - marca));
+    const alvo = document.getElementById('fps');
+    alvo.textContent = fps;
+    alvo.className = fps >= 30 ? 'fps ok' : (fps >= 15 ? 'fps' : 'fps bad');
+    quadros = 0; marca = agora;
+  }
+})();
+
+/* ---- controles ---- */
+let arrasto = null;
+canvas.addEventListener('pointerdown', (e) => { arrasto = { x: e.clientX, y: e.clientY, rx: grade.rotation.x, ry: grade.rotation.y }; });
+addEventListener('pointerup', () => { arrasto = null; });
+addEventListener('pointermove', (e) => {
+  if (!arrasto) return;
+  grade.rotation.y = arrasto.ry + (e.clientX - arrasto.x) * 0.005;
+  grade.rotation.x = arrasto.rx + (e.clientY - arrasto.y) * 0.005;
+});
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  camera.position.z = Math.max(4, Math.min(24, camera.position.z + (e.deltaY > 0 ? 1 : -1)));
+}, { passive: false });
+
+linha('—');
+linha('FPS abaixo de 15 nesta página significa que o modo holograma vai pesar.');
+</script>
+</body>
+</html>

@@ -164,7 +164,16 @@ input::placeholder{color:var(--tech)}
   </div>
 </div>
 
-<script src="./vendor/three.min.js"></script>
+<!-- Import map: o GLTFLoader importa de 'three' por nome. Sem isto ele não
+     resolve, e é o motivo de o projeto usar o build ESM em vez do UMD — uma
+     cópia só do Three.js, sem shim reexportando globais. -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.js"
+  }
+}
+</script>
 <script type="module" src="./app.js"></script>
 </body>
 </html>

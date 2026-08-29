@@ -106,6 +106,7 @@ class Orchestrator:
             facts=self.facts,
             skills=self.skills,
             modes=self.modes,
+            bus=self.bus,
         )
         self.gesture_actions = GestureActions(
             self.guard,

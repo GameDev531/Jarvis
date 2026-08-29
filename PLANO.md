@@ -26,10 +26,11 @@ descreve por que as coisas são como são e o que falta.
 | 13 — Agentes especialistas | ✅ | Recorte de catálogo por perfil |
 | 14 — Modos e gestos | ✅ | Recursos contínuos ligam sob comando; webcam e gestos dentro disso |
 | 15 — Interface holográfica | ✅ | Desenho do usuário portado, servido como modo, ligado ao estado real |
-| 16 — Wake word própria | ⬜ | Treino de "James" via openWakeWord |
-| 17 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
+| 16 — Projeção holográfica | ✅ | Shader, catálogo curado de 14 assuntos, cascata com tetos |
+| 17 — Wake word própria | ⬜ | Treino de "James" via openWakeWord |
+| 18 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
 
-**740 testes automatizados.** Nada de Porcupine, Piper, whisper.cpp, Qt ou
+**761 testes automatizados.** Nada de Porcupine, Piper, whisper.cpp, Qt ou
 câmera foi executado em hardware real ainda — a Fase 0 existe para isso.
 
 ---
@@ -530,6 +531,97 @@ uma injection tentaria, e a estética só é sustentável se for mesmo só esté
 Roda de verdade — as capturas em `ui/web/design/rodando-*.png` saíram de um
 Chromium real contra o servidor real, com zero erro de console. Falta o modelo
 poder criar janelas de projeção por ferramenta, hoje elas vêm de catálogo fixo.
+
+---
+
+## Fase 16 — Projeção holográfica (feita)
+
+`ui/web/holo-material.js`, `holo-catalog.js`, `holo-resolver.js`,
+`james/tools/holograma.py`.
+
+### A pergunta que originou a fase
+
+Você propôs: pegar modelo 3D da Sketchfab, aplicar shader de holograma,
+mostrar na aba. A parte do shader estava certa. A fonte, não — e a investigação
+mudou o desenho inteiro.
+
+**Sobre a Sketchfab:** a API está em fim de vida (a própria Sketchfab diz que a
+Download API funciona "até novas APIs no Fab"), exige OAuth em vez de chave
+estática, e entrega fotogrametria de 20 a 80 MB. Construir em cima seria
+construir duas vezes, e cada projeção travaria a máquina.
+
+### O achado que inverteu a intuição
+
+**Um holograma não quer o modelo bom. Quer o modelo limpo.**
+
+O shader lê silhueta e topologia, e descarta textura, cor e material. Então uma
+malha fotogrametrada fica *pior* depois do shader que uma malha simples:
+
+- as texturas PBR são jogadas fora (não há albedo num holograma);
+- triangulação irregular de scan deixa as scanlines sujas;
+- normais de fotogrametria são ruidosas, e o fresnel fica manchado.
+
+Isso inverte a conclusão óbvia. Low-poly não é concessão à máquina fraca — é o
+input melhor. As duas restrições apontam para o mesmo lado, o que é raro.
+
+### O que foi construído
+
+**Catálogo curado (nível 1): 14 assuntos gerados em código.** Cérebro, coração,
+DNA, Terra, foguete, átomo, molécula, reator, satélite, drone, pulmão, cristal,
+galáxia, cidade. De 144 a 3.043 vértices cada. Zero rede, zero chave, zero
+licença — um cérebro gerado por seno não tem autor a creditar.
+
+**Cascata de quatro níveis** (`holo-resolver.js`): catálogo → cache local →
+remoto → genérico. O nível 4 garante que a tela nunca fica vazia, e é
+determinístico: a mesma palavra dá sempre a mesma forma, senão o holograma
+pareceria instável em vez de desconhecido.
+
+**Material holográfico** com fresnel, scanlines no espaço do mundo, glitch em
+rajadas e blending aditivo. As scanlines serem calculadas no mundo e não na tela
+é o detalhe que separa "projeção" de "listra colada na câmera": no espaço da
+tela, girar o objeto arrasta as listras junto e o efeito quebra.
+
+### Dois defeitos que a conferência visual pegou
+
+Nenhum dos dois apareceria em teste automatizado — são erros de forma, e forma
+só se julga olhando.
+
+1. **O coração saiu como uma gota.** Eu tinha deformado uma esfera por função
+   radial. A fenda entre os lobos e a ponta de baixo são descontinuidades, e
+   função radial suave não produz descontinuidade. Refeito com a curva
+   paramétrica clássica inflada na profundidade, que já traz as duas embutidas.
+2. **Satélite e drone sumiam.** Painéis de 2 cm de espessura e rotores de toro
+   fino desaparecem vistos de lado — e metade da órbita mostra exatamente esse
+   ângulo. Engrossados.
+
+Houve também um erro de sintaxe instrutivo: uma crase dentro de um comentário
+JS que estava dentro do template literal do shader fechou a string antes da
+hora. O navegador reportou `Unexpected identifier`, e a causa estava a três
+linhas de distância do sintoma.
+
+### Os tetos, porque GLB remoto é dado não confiável
+
+8 MB (conferido no `Content-Length` **e** no buffer, porque servidor mente),
+250.000 vértices, 400 objetos, 15 s. Sem `resourcePath`: o loader não sai
+buscando `.bin` nem textura solta na rede. Estourou, descarta e cai um nível.
+
+O cache fica em `state/models/`, fora de `ui/web/`, e o servidor só aceita nome
+de arquivo simples em `/models/` — sem barra, sem ponto inicial. Um modelo
+chamado `app.js` não sobrescreve a interface, e há teste para isso.
+
+### Como isso conversa com o resto
+
+A ferramenta `projetar_holograma` é fina de propósito: publica o pedido no
+`StateBus` e acabou. Quem resolve assunto em geometria é o navegador, que já
+tem o Three.js, a cascata e a GPU. E ela é `fire_and_forget` — "Projetando o
+cérebro" é frase previsível, então **não gasta uma requisição a mais**.
+
+### Estado
+
+14/14 assuntos verificados num Chromium real, com os tetos e o fallback
+genérico conferidos por botão na página `teste.html`. O nível 3 (remoto) está
+construído e dormente: falta plugar a Poly Pizza, que é a única peça que depende
+de confirmar o formato da API deles com a chave em mãos.
 
 ---
 

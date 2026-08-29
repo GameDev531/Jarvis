@@ -122,6 +122,10 @@ class Guard:
             "instalar_habilidade": self._rule_instalar_habilidade,
             # --- modos ---
             "listar_modos": self._rule_sem_risco,
+            # Projetar desenha numa tela local: não toca no sistema, não sai
+            # da máquina, e fechar a janela desfaz. Nível 1.
+            "projetar_holograma": self._rule_sem_risco,
+            "fechar_hologramas": self._rule_sem_risco,
             "ativar_modo": self._rule_ativar_modo,
             # Desligar é Nível 1 sempre, por princípio (ver a regra).
             "desativar_modo": self._rule_desativar_modo,

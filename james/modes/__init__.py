@@ -44,11 +44,13 @@ def build_manager(config, *, on_acao=None, bus=None, on_comando=None, on_escutar
         from james.ui.web_server import WebInterfaceServer
 
         raiz = config.resolve_path("modos.holograma.dir", "ui/web")
+        cache = config.resolve_path("modos.holograma.cache", "state/models")
         porta = int(holo.get("porta", 0))
         manager.register(
             HologramMode(
                 server_factory=lambda: WebInterfaceServer(
-                    raiz, bus, on_comando=on_comando, on_escutar=on_escutar, porta=porta
+                    raiz, bus, on_comando=on_comando, on_escutar=on_escutar,
+                    porta=porta, modelos=cache,
                 ),
                 abrir_navegador=bool(holo.get("abrir_navegador", True)),
             )

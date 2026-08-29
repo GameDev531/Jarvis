@@ -61,6 +61,8 @@ _TIPOS = {
     ".css": "text/css; charset=utf-8",
     ".png": "image/png",
     ".svg": "image/svg+xml",
+    ".glb": "model/gltf-binary",
+    ".gltf": "model/gltf+json",
 }
 
 
@@ -75,8 +77,14 @@ class WebInterfaceServer:
         on_comando=None,
         on_escutar=None,
         porta: int = 0,
+        modelos: Path | None = None,
     ) -> None:
         self.raiz = Path(raiz).resolve()
+        # Cache de modelos 3D baixados. Fica FORA da raiz do código de
+        # propósito: conteúdo gerado não se mistura com fonte versionada, e
+        # assim um modelo baixado nunca pode sobrescrever um arquivo da
+        # interface — nem que o nome bata.
+        self.modelos = Path(modelos).resolve() if modelos else None
         self.bus = bus
         self.on_comando = on_comando
         self.on_escutar = on_escutar
@@ -133,15 +141,30 @@ class WebInterfaceServer:
     # -------------------------------------------------------------- segurança
 
     def caminho_de(self, rota: str) -> Path | None:
-        """Resolve uma rota dentro da raiz. None quando escapa ou não existe."""
+        """Resolve uma rota. None quando escapa da raiz ou não existe."""
         limpo = rota.split("?", 1)[0].lstrip("/") or "index.html"
+
+        # /models/* sai do cache, não do código. Só nomes de arquivo simples:
+        # o slug já é sanitizado do lado do JS, mas quem serve não confia em
+        # quem pede — uma barra aqui seria travessia.
+        if limpo.startswith("models/"):
+            if self.modelos is None:
+                return None
+            nome = limpo[len("models/"):]
+            if not nome or "/" in nome or "\\" in nome or nome.startswith("."):
+                return None
+            base = self.modelos
+        else:
+            base = self.raiz
+            nome = limpo
+
         try:
-            alvo = (self.raiz / limpo).resolve()
+            alvo = (base / nome).resolve()
         except (OSError, ValueError):
             return None
         # `is_relative_to` compara depois de resolver, então pega `..` e link
         # simbólico apontando para fora — os dois jeitos clássicos de escapar.
-        if not alvo.is_relative_to(self.raiz) or not alvo.is_file():
+        if not alvo.is_relative_to(base) or not alvo.is_file():
             return None
         return alvo
 

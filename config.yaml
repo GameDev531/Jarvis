@@ -246,6 +246,11 @@ modos:
     porta: 0                 # 0 = o sistema escolhe uma porta livre
     abrir_navegador: true    # false = o James só diz a URL, você abre quando quiser
 
+    # Cache de modelos 3D. Fica fora de ui/web de propósito: conteúdo baixado
+    # não se mistura com código versionado, e assim um modelo nunca pode
+    # sobrescrever um arquivo da interface nem que o nome bata.
+    cache: state/models
+
 office:
   # Onde salvar apresentações e planilhas. Precisa estar em permissions.folders.
   # Vazio = usa a primeira pasta permitida.
