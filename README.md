@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 16 implementadas. 783 testes automatizados.
+**Estado atual:** Fases 0 a 16 implementadas. 784 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -116,12 +116,36 @@ python wake_listener.py
 
 O veredito começa com `PRIMEIRO ISTO:` quando o que falta é só instalação.
 
-O `wake_listener.py` sobe e supervisiona o orquestrador sozinho. Não rode
-`main.py` diretamente, exceto para depurar.
+O `wake_listener.py` sobe e supervisiona o orquestrador sozinho — os dois
+processos com um comando só.
 
 Diga **"Jarvis"** (palavra pré-treinada do Porcupine) e depois o comando.
 `Ctrl+Alt+J` cancela qualquer coisa em andamento. `python set_pin.py` define um
 PIN para as ações de risco (opcional).
+
+### Só quero ver as interfaces
+
+Para conferir se está de pé sem depender de microfone, chave ou voz do Piper:
+
+```bash
+python main.py                 # janela Qt (sobe em modo degradado, sem chave)
+python main.py --holograma     # + interface holográfica, abre o navegador
+python main.py --modo gestos   # liga qualquer modo pelo nome
+```
+
+`--holograma` existe porque havia um nó: a interface web só ligava por voz, mas
+o campo de comando que ligaria o resto vive **dentro** dela. Sem o pipeline de
+voz funcionando não havia como chegar à tela.
+
+Isso não fura o guard. A confirmação de Nível 2 existe para saber *quem* está
+pedindo — e quem tem acesso ao terminal já é a pessoa da máquina. Ligar por voz
+é que precisa provar identidade.
+
+Rodando `main.py` direto, ele fica esperando a conexão do processo 1 e nenhum
+turno de voz acontece. É o modo de olhar, não de usar.
+
+Para conferir só o catálogo 3D, sem nem o James: abra `/teste.html` na porta que
+o `--holograma` mostrar.
 
 ---
 
@@ -705,7 +729,7 @@ por voz sai **uma vez**, não a cada turno.
 ## Testes
 
 ```bash
-python -m pytest tests/ -q          # 783 testes
+python -m pytest tests/ -q          # 784 testes
 ```
 
 | Arquivo | O que cobre |

@@ -200,3 +200,30 @@ def test_segredos_continuam_ignorados():
             timeout=10,
         )
         assert resultado.returncode == 0, f"{caminho} DEVERIA estar ignorado"
+
+
+# --------------------------------------------------- pontos de entrada
+
+def test_main_aceita_as_flags_documentadas():
+    """`--holograma` desfaz um nó: a interface web só ligava por voz, mas o
+    campo de comando que ligaria o resto vive dentro dela. Se a flag sumir,
+    volta a não haver como ver a tela sem microfone e chave."""
+    import argparse
+    from unittest.mock import patch
+
+    import james.runtime.orchestrator as orq
+
+    capturado = {}
+
+    def falso_parse(self, args=None, namespace=None):
+        ns = argparse.Namespace(modo=[], holograma=False)
+        capturado["args"] = list(args or [])
+        raise SystemExit(0)      # para antes de construir o orquestrador
+
+    with patch.object(argparse.ArgumentParser, "parse_args", falso_parse):
+        for flags in (["--holograma"], ["--modo", "gestos"], []):
+            try:
+                orq.main(flags)
+            except SystemExit:
+                pass
+            assert capturado["args"] == flags

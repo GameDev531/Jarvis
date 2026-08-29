@@ -30,7 +30,7 @@ descreve por que as coisas são como são e o que falta.
 | 17 — Wake word própria | ⬜ | Treino de "James" via openWakeWord |
 | 18 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
 
-**783 testes automatizados.** Nada de Porcupine, Piper, whisper.cpp, Qt ou
+**784 testes automatizados.** Nada de Porcupine, Piper, whisper.cpp, Qt ou
 câmera foi executado em hardware real ainda — a Fase 0 existe para isso.
 
 ---

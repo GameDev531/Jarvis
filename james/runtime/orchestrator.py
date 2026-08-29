@@ -40,7 +40,7 @@ from james.llm.router import LocalRouter
 from james.logs import audit, get_logger, setup_logging
 from james.memory import MemoryStore
 from james.memory.fact_store import FactStore
-from james.modes import GestureActions, build_manager as build_modes
+from james.modes import GestureActions, ModeError, build_manager as build_modes
 from james.skills import SkillRegistry
 from james.permissions.confirm import Confirmation, ConfirmationMatcher
 from james.permissions.guard import Decision, Guard
@@ -886,7 +886,34 @@ class Orchestrator:
         return greeting_instruction()
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="main.py",
+        description="Orquestrador do James (processo 2).",
+        epilog=(
+            "Normalmente quem inicia isto é o wake_listener.py. Rodar direto "
+            "serve para ver as interfaces sem depender da palavra de ativação."
+        ),
+    )
+    parser.add_argument(
+        "--modo",
+        action="append",
+        default=[],
+        metavar="NOME",
+        help=(
+            "Liga um modo assim que o James subir, sem precisar do comando de "
+            "voz. Pode repetir. Ex: --modo holograma"
+        ),
+    )
+    parser.add_argument(
+        "--holograma",
+        action="store_true",
+        help="Atalho para --modo holograma (abre a interface no navegador).",
+    )
+    args = parser.parse_args(argv)
+
     try:
         config = load_config()
     except ConfigError as exc:
@@ -905,6 +932,23 @@ def main() -> int:
         logger.warning(warning)
 
     orchestrator = Orchestrator(config)
+
+    # Ligar um modo pela linha de comando desfaz um nó: a interface holográfica
+    # só ligava por voz, mas o campo de comando que ligaria o resto vive DENTRO
+    # dela. Sem microfone, chave ou voz do Piper funcionando, não havia como
+    # chegar à tela — e "instale tudo antes de ver qualquer coisa" é uma
+    # barreira alta demais para quem só quer conferir se está de pé.
+    #
+    # Isto NÃO fura o guard: a confirmação de Nível 2 existe para saber quem
+    # está pedindo, e quem tem acesso ao terminal já é a pessoa da máquina.
+    # Ligar por voz é que precisa provar identidade.
+    pedidos = list(args.modo) + (["holograma"] if args.holograma else [])
+    for nome in dict.fromkeys(pedidos):        # sem repetir, mantendo a ordem
+        try:
+            print(orchestrator.modes.ligar(nome))
+        except ModeError as exc:
+            print(f"Não consegui ligar o modo '{nome}': {exc}", file=sys.stderr)
+
     try:
         return orchestrator.run()
     except KeyboardInterrupt:
