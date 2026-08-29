@@ -30,7 +30,7 @@ descreve por que as coisas são como são e o que falta.
 | 17 — Wake word própria | ⬜ | Treino de "James" via openWakeWord |
 | 18 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
 
-**761 testes automatizados.** Nada de Porcupine, Piper, whisper.cpp, Qt ou
+**783 testes automatizados.** Nada de Porcupine, Piper, whisper.cpp, Qt ou
 câmera foi executado em hardware real ainda — a Fase 0 existe para isso.
 
 ---
@@ -622,6 +622,79 @@ cérebro" é frase previsível, então **não gasta uma requisição a mais**.
 genérico conferidos por botão na página `teste.html`. O nível 3 (remoto) está
 construído e dormente: falta plugar a Poly Pizza, que é a única peça que depende
 de confirmar o formato da API deles com a chave em mãos.
+
+---
+
+## Correção: `james/state/` nunca foi distribuído
+
+Bug encontrado quando o projeto foi baixado numa máquina limpa pela primeira
+vez. Vale registrar por inteiro, porque a classe de erro é sorrateira.
+
+### O que acontecia
+
+```
+ModuleNotFoundError: No module named 'james.state'
+```
+
+O pacote existia no disco de quem escreveu e **nunca foi para o GitHub**:
+
+```
+$ git check-ignore -v james/state/ipc.py
+.gitignore:10:state/    james/state/ipc.py
+```
+
+A regra `state/` foi escrita pensando na pasta de estado em runtime da raiz.
+Mas um padrão sem barra inicial casa em **qualquer profundidade** — e engoliu o
+pacote Python inteiro. Três arquivos: `__init__.py`, `ipc.py`,
+`runtime_state.py`.
+
+### Por que 761 testes verdes não pegaram
+
+Porque eles respondiam a pergunta errada. "Os testes passam" e "o projeto
+funciona quando alguém baixa" são afirmações diferentes, e só a primeira estava
+coberta. Os arquivos existiam localmente; o git, corretamente, fica calado
+sobre o que ignora. O erro só existia para quem clonava.
+
+### O que mudou
+
+**Âncoras no `.gitignore`.** Todo padrão de pasta de runtime ganhou `/` na
+frente: `/state/`, `/models/`, `/voices/`, `/memories/`, `/logs/*.log`. Havia
+mais três minas do mesmo tipo esperando — `models/` teria engolido um futuro
+`james/models/`, e `voices/` passou perto de `james/voice/`. Os padrões por
+extensão (`*.onnx`, `*.task`) continuam sem âncora de propósito: são arquivos
+de modelo, que podem aparecer em qualquer pasta e nunca são código.
+
+**`tests/test_repo_integrity.py`.** O que faltou não foi cuidado, foi um teste.
+Ele roda `git check-ignore` sobre todo `.py`/`.js`/`.html`/`.css` de `james/`,
+`tests/` e `ui/` e falha se algum estiver sendo ignorado; confere que todo
+diretório com `__init__.py` está rastreado; e recusa padrões de pasta sem
+âncora no próprio `.gitignore`. Pula limpo sem git, para não quebrar em quem
+baixou o ZIP. Verificado: reintroduzindo `state/` no `.gitignore`, ele falha.
+
+### O relatório da Fase 0 também mentia por omissão
+
+Na mesma execução, três dos quatro "testes críticos com falha" eram apenas
+bibliotecas não instaladas — e o relatório mostrava isso igual a uma falha de
+verdade, com o mesmo `[FALHOU]`. Quem leu concluiu "bastante problema" quando
+três linhas eram um `pip install`.
+
+Agora `CheckResult` carrega `missing_dep`, o relatório marca `[FALTA ]` em vez
+de `[FALHOU]`, e o veredito começa com **"PRIMEIRO ISTO: as dependências não
+estão instaladas"** — antes de discutir AVX ou perfil visual, que é conversa
+fora de hora numa máquina que ninguém terminou de preparar.
+
+### Dois achados reais da máquina de destino
+
+Registrados aqui porque mudam premissas, e não são bugs:
+
+- **O processador TEM AVX.** A premissa "sem AVX" nunca tinha sido verificada e
+  motivou trocar faster-whisper por whisper.cpp e Silero por webrtcvad. O
+  relatório levanta a bandeira sozinho. Recomendação atual: **não reverter** —
+  é um Sandy Bridge de 2011, com AVX mas sem AVX2, 7,9 GB de RAM e rede lenta;
+  o CTranslate2 do faster-whisper custaria caro para instalar e carregar.
+- **Rede de 1938 ms de conexão** (1593 ms para subir 100 KB). Isso ameaça a
+  meta de 3,5 s e reabre a decisão E2: com essa latência, o roteador local em
+  paralelo deixa de ser opcional e passa a valer bastante.
 
 ---
 

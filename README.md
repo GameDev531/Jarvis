@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 16 implementadas. 761 testes automatizados.
+**Estado atual:** Fases 0 a 16 implementadas. 783 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -80,19 +80,48 @@ abaixo) — nada fica impossível.
 
 ---
 
-## Uso
+## Primeira execução — na ordem
+
+Os cinco passos abaixo são sequenciais. Pular o primeiro é o erro mais comum, e
+ele se manifesta lá na frente como `ModuleNotFoundError`, que parece outra
+coisa.
 
 ```bash
-python check_hardware.py     # Fase 0 — rode isto PRIMEIRO
-python wake_listener.py      # inicia o James
-python set_pin.py            # opcional: PIN para ações de risco
+# 1. Instalar (é isto que traz PySide6, Porcupine e webrtcvad)
+python -m venv .venv
+.venv\Scripts\activate
+pip install -e ".[dev]"
+
+# 2. Chaves de API
+copy .env.example .env        # e preencha as três chaves
+
+# 3. Voz do Piper — download manual, ver a seção de instalação
+#    voices/pt_BR-faber-medium.onnx  +  o .onnx.json ao lado
+
+# 4. Conferir a máquina
+python check_hardware.py      # leia o VEREDITO, ele diz o que falta
+
+# 5. Rodar
+python wake_listener.py
 ```
+
+**Como ler o relatório do passo 4:**
+
+| Marca | Significa |
+|---|---|
+| `[  OK  ]` | Funciona nesta máquina |
+| `[FALTA ]` | Biblioteca não instalada — volte ao passo 1 |
+| `[FALHOU]` | Instalada, mas não funciona aqui — é problema de verdade |
+| `[ AVISO]` | Opcional ausente; o James roda sem |
+
+O veredito começa com `PRIMEIRO ISTO:` quando o que falta é só instalação.
 
 O `wake_listener.py` sobe e supervisiona o orquestrador sozinho. Não rode
 `main.py` diretamente, exceto para depurar.
 
 Diga **"Jarvis"** (palavra pré-treinada do Porcupine) e depois o comando.
-`Ctrl+Alt+J` cancela qualquer coisa em andamento.
+`Ctrl+Alt+J` cancela qualquer coisa em andamento. `python set_pin.py` define um
+PIN para as ações de risco (opcional).
 
 ---
 
@@ -676,7 +705,7 @@ por voz sai **uma vez**, não a cada turno.
 ## Testes
 
 ```bash
-python -m pytest tests/ -q          # 761 testes
+python -m pytest tests/ -q          # 783 testes
 ```
 
 | Arquivo | O que cobre |
@@ -711,6 +740,8 @@ python -m pytest tests/ -q          # 761 testes
 | `test_mode_tools.py` | Gesto recusado no Nível 2, ferramentas de modo, guard |
 | `test_web_interface.py` | Travessia de caminho, token, CSRF, barramento, modo holograma |
 | `test_holograma.py` | Ferramenta de projeção, cache de modelos, tetos, GLB gerado |
+| `test_repo_integrity.py` | Nenhum código-fonte ignorado pelo git; pacotes rastreados |
+| `test_check_hardware.py` | Ausente vs quebrado, alinhamento, veredito |
 | `test_hotkey.py` | Interpretação do atalho |
 
 ---

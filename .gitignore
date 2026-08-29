@@ -3,20 +3,32 @@
 *.key
 credentials.json
 
+# ---------------------------------------------------------------------------
 # Estado local gerado em runtime
-hardware_report.json
-logs/*.log
-logs/*.jsonl
-state/
-runtime_state.json
+# ---------------------------------------------------------------------------
+# A BARRA INICIAL NÃO É ENFEITE. Sem ela, o padrão casa com qualquer diretório
+# de mesmo nome em QUALQUER profundidade — e foi exatamente assim que um
+# `state/` sem âncora engoliu o pacote Python `james/state/` inteiro, que
+# nunca chegou ao GitHub. Os testes passavam porque os arquivos existiam no
+# disco de quem escreveu; só quem clonava descobria.
+#
+# Regra: tudo que é pasta de runtime na RAIZ leva `/` na frente.
+# Ver tests/test_repo_integrity.py, que falha se isso voltar a acontecer.
+/hardware_report.json
+/logs/*.log
+/logs/*.jsonl
+/state/
+/runtime_state.json
 # Memória curada: conteúdo pessoal, gerado na primeira execução
-memories/
-usage_counters.json
-james.lock
+/memories/
+/usage_counters.json
+/james.lock
 
 # Modelos e vozes (grandes, baixados localmente)
-voices/
-models/
+/voices/
+/models/
+# Estes são por EXTENSÃO e ficam sem âncora de propósito: um arquivo de modelo
+# pode aparecer legitimamente em qualquer pasta, e nenhum deles é código-fonte.
 *.onnx
 *.onnx.json
 *.ppn

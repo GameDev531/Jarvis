@@ -53,6 +53,7 @@ class CheckResult(dict):
         metrics: dict[str, Any] | None = None,
         error: str = "",
         critical: bool = True,
+        missing_dep: bool = False,
     ) -> None:
         super().__init__(
             name=name,
@@ -61,6 +62,10 @@ class CheckResult(dict):
             metrics=metrics or {},
             error=error,
             critical=critical,
+            # Distingue "a biblioteca não está instalada" de "está instalada e
+            # quebrou". Os dois falham, mas só o primeiro se resolve com uma
+            # linha de `pip install` — e mostrá-los igual assusta sem ajudar.
+            missing_dep=missing_dep,
         )
 
 
@@ -189,7 +194,9 @@ def check_onnxruntime() -> CheckResult:
         import numpy as np
         import onnxruntime as ort
     except ImportError as exc:
-        return CheckResult("onnxruntime", False, error=f"não instalado: {exc}")
+        return CheckResult(
+            "onnxruntime", False, error=f"não instalado: {exc}", missing_dep=True
+        )
 
     started = time.monotonic()
     providers = ort.get_available_providers()
@@ -250,7 +257,9 @@ def check_webrtcvad() -> CheckResult:
     try:
         import webrtcvad
     except ImportError as exc:
-        return CheckResult("webrtcvad", False, error=f"não instalado: {exc}")
+        return CheckResult(
+            "webrtcvad", False, error=f"não instalado: {exc}", missing_dep=True
+        )
 
     vad = webrtcvad.Vad(2)
     frame = b"\x00\x00" * 480          # 30 ms a 16 kHz, mono, 16-bit
@@ -274,7 +283,9 @@ def check_porcupine() -> CheckResult:
         import numpy as np
         import pvporcupine
     except ImportError as exc:
-        return CheckResult("porcupine", False, error=f"não instalado: {exc}")
+        return CheckResult(
+            "porcupine", False, error=f"não instalado: {exc}", missing_dep=True
+        )
 
     from james.config import get_secret, load_config
 
@@ -428,7 +439,9 @@ def check_network() -> CheckResult:
     try:
         import httpx
     except ImportError as exc:
-        return CheckResult("rede", False, error=f"httpx não instalado: {exc}")
+        return CheckResult(
+            "rede", False, error=f"httpx não instalado: {exc}", missing_dep=True
+        )
 
     host = "https://generativelanguage.googleapis.com/"
     try:
@@ -472,7 +485,9 @@ def check_qt() -> CheckResult:
         from PySide6.QtGui import QColor, QPainter, QPixmap
         from PySide6.QtWidgets import QApplication
     except ImportError as exc:
-        return CheckResult("qt", False, error=f"PySide6 não instalado: {exc}")
+        return CheckResult(
+            "qt", False, error=f"PySide6 não instalado: {exc}", missing_dep=True
+        )
 
     app = QApplication.instance() or QApplication([])
     pixmap = QPixmap(240, 200)
@@ -518,7 +533,8 @@ def check_gestures() -> CheckResult:
         import numpy as np
     except ImportError as exc:
         return CheckResult(
-            "gestos", False, error=f"numpy não instalado: {exc}", critical=False
+            "gestos", False, error=f"numpy não instalado: {exc}",
+            critical=False, missing_dep=True
         )
     try:
         import mediapipe  # noqa: F401
@@ -529,6 +545,7 @@ def check_gestures() -> CheckResult:
             detail="MediaPipe não instalado — o modo de gestos fica indisponível",
             error='instale com: pip install -e ".[gestures]"',
             critical=False,
+            missing_dep=True,
         )
 
     from pathlib import Path
@@ -654,7 +671,14 @@ def _print_report(results: list[CheckResult]) -> None:
     print("  JAMES — RELATÓRIO DE COMPATIBILIDADE (Fase 0)")
     print("=" * 72)
     for result in results:
-        mark = "  OK  " if result["ok"] else ("FALHOU" if result["critical"] else " AVISO")
+        if result["ok"]:
+            mark = "  OK  "
+        elif result.get("missing_dep"):
+            # "AUSENTE" comunica o que "FALHOU" esconde: não tem nada quebrado
+            # nesta máquina, só falta instalar.
+            mark = "FALTA "
+        else:
+            mark = "FALHOU" if result["critical"] else " AVISO"
         print(f"[{mark}] {result['name']:<12} {result['detail'] or result['error']}")
         if result["error"] and result["detail"]:
             print(f"{'':>10}{result['error']}")
@@ -665,6 +689,27 @@ def _verdict(results: list[CheckResult]) -> dict[str, Any]:
     """Traduz os números em decisões concretas para as fases seguintes."""
     by_name = {result["name"]: result for result in results}
     notes: list[str] = []
+
+    # A nota de instalação vem antes de tudo: quando as dependências faltam, o
+    # resto do relatório descreve uma máquina que ninguém terminou de preparar,
+    # e discutir AVX ou perfil visual antes disso é conversa fora de hora.
+    ausentes = [r["name"] for r in results if not r["ok"] and r.get("missing_dep")]
+    criticos_ausentes = [
+        r["name"] for r in results
+        if not r["ok"] and r.get("missing_dep") and r["critical"]
+    ]
+    if criticos_ausentes:
+        notes.append(
+            "PRIMEIRO ISTO: as dependências não estão instaladas — "
+            f"{', '.join(criticos_ausentes)}. Rode `pip install -e \".[dev]\"` na "
+            "pasta do projeto e repita este teste. Nada está quebrado nesta "
+            "máquina; a instalação é que não foi feita."
+        )
+    elif ausentes:
+        notes.append(
+            f"Opcionais não instalados: {', '.join(ausentes)}. "
+            "O James roda sem eles, com as capacidades correspondentes desligadas."
+        )
 
     cpu = by_name.get("cpu", {}).get("metrics", {})
     has_avx = bool(cpu.get("avx"))
@@ -727,6 +772,8 @@ def _verdict(results: list[CheckResult]) -> dict[str, Any]:
     return {
         "pronto_para_fase_1": not criticos,
         "testes_criticos_falhos": criticos,
+        "dependencias_ausentes": ausentes,
+        "precisa_instalar": bool(criticos_ausentes),
         "tem_avx": has_avx,
         "perfil_visual_sugerido": perfil,
         "observacoes": notes,
