@@ -181,19 +181,21 @@ class Orchestrator:
             return None
 
     def _build_tts(self):
-        from james.voice.tts import PiperTTS, TTSUnavailable
+        """A cadeia de vozes: nuvem primeiro, local como reserva.
 
-        try:
-            return PiperTTS(
-                voice_path=self.config.resolve_path("tts.voice_path"),
-                binary=self.config.resolve_path("tts.binary"),
-                length_scale=float(self.config.get("tts.length_scale", 1.0)),
-            )
-        except TTSUnavailable as exc:
-            logger.error("Piper indisponível: %s — o James ficará mudo.", exc)
-            return None
+        Antes daqui saía um PiperTTS direto. A cadeia mantém o mesmo contrato
+        (`synthesize` + `sample_rate`), então nada além desta função mudou —
+        e é ela que faz o motor local virar opção B em vez de única opção.
+        """
+        from james.voice.chain import build_voice_chain
 
-    # ------------------------------------------------------------ ciclo de vida
+        cadeia = build_voice_chain(self.config, state_dir=self.config.root / "state")
+        if cadeia.disponivel:
+            logger.info("Voz: %s", cadeia.backend)
+            return cadeia
+        # `build_voice_chain` já explicou o motivo de cada motor ausente;
+        # repetir aqui só duplicaria a linha no log.
+        return None
 
     def run(self) -> int:
         """Sobe a interface Qt e o pipeline. Bloqueia até o James encerrar."""

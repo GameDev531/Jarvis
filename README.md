@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 16 implementadas. 814 testes automatizados.
+**Estado atual:** Fases 0 a 16 implementadas. 844 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -14,11 +14,17 @@ O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md
 Cada modelo faz o que só ele faz bem, e cada um tem cota independente — o que
 na prática dobra o uso diário possível.
 
-| Papel | Quem faz | O quê |
+| Papel | Quem faz | Unidade cobrada |
 |---|---|---|
-| **Percepção** | Gemini | Ouve o áudio e transcreve |
-| **Raciocínio** | OpenRouter | Decide, planeja, escreve, chama ferramentas |
-| **Visão** | Gemini, OpenRouter | Analisa tela e câmera |
+| **Percepção** | Gemini | requisições — ouve o áudio e transcreve |
+| **Raciocínio** | OpenRouter | requisições — decide, planeja, escreve, chama ferramentas |
+| **Visão** | Gemini, OpenRouter | requisições — analisa tela e câmera |
+| **Voz** | ElevenLabs, Piper | **caracteres** — só lê em voz alta |
+
+A última linha é a que faz a conta fechar: **a ElevenLabs nunca vê a
+conversa.** Ela recebe a frase final e mais nada. Raciocínio, histórico,
+resultado de busca e descrição de imagem ficam fora da cota de voz — o que é
+cobrado é só o que sai pelo alto-falante.
 
 O fluxo tem um efeito colateral valioso: como a transcrição chega **antes** do
 raciocínio, o roteador local pode interceptar comandos frequentes e resolvê-los
@@ -59,6 +65,7 @@ copy .env.example .env
 | `GEMINI_API_KEY` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | ouvir e ver |
 | `OPENROUTER_API_KEY` | [openrouter.ai/keys](https://openrouter.ai/keys) | pensar e agir |
 | `PORCUPINE_ACCESS_KEY` | [console.picovoice.ai](https://console.picovoice.ai) | palavra de ativação |
+| `ELEVENLABS_API_KEY` | [elevenlabs.io](https://elevenlabs.io) | voz na nuvem (opcional) |
 
 O `.env` está no `.gitignore`. Nunca comite ele.
 
@@ -146,6 +153,66 @@ turno de voz acontece. É o modo de olhar, não de usar.
 
 Para conferir só o catálogo 3D, sem nem o James: abra `/teste.html` na porta que
 o `--holograma` mostrar.
+
+---
+
+## Voz — nuvem primeiro, local como reserva
+
+```yaml
+voz:
+  cadeia: [elevenlabs, piper]   # padrão
+  cadeia: [piper]               # tudo offline
+```
+
+Mesmo desenho de `llm.roles`: lista em ordem de preferência, quem estiver de pé
+assume. A troca é **audível** — você percebe pela voz qual motor está falando,
+o que é um indicador melhor que qualquer log.
+
+### A economia que sustenta o plano grátis
+
+A ElevenLabs cobra por **caractere sintetizado**, e o plano grátis dá 10.000 por
+mês. Isso só rende porque ela recebe apenas a frase final:
+
+```
+"que horas são"
+   → Gemini transcreve            requisição
+   → OpenRouter decide e escreve  requisição
+   → "São duas da tarde, senhor."
+        ↑ 26 caracteres — é só isto que a ElevenLabs cobra
+```
+
+Raciocínio, histórico, busca e visão não entram na conta. Uma resposta média
+tem ~150 caracteres, então dá umas 60 respostas por mês.
+
+### Duas escolhas que dobram o que a cota rende
+
+**`eleven_flash_v2_5`** custa metade dos créditos por caractere e é o modelo de
+menor latência (~75 ms). A qualidade fica um pouco abaixo do `multilingual_v2` —
+é a troca, e ela é consciente.
+
+**`pcm_16000`** em vez do MP3 padrão. O áudio já chega no formato do resto do
+pipeline (16 kHz, mono, 16 bits), o mesmo do microfone e do VAD. Sem
+decodificador, sem dependência nova, sem latência extra. O 44.1 kHz exigiria
+plano Pro; o de 16 kHz não — e é o que queremos de qualquer forma.
+
+### O contador é o que torna isso usável
+
+Sem ele o pior acontece em silêncio: o James fala bem por três dias, a cota
+acaba, e ele emudece com um 401 genérico no meio de um turno.
+
+- Avisa em **80%** do ciclo
+- Pergunta **antes** de sintetizar (`cabe`), para não gastar meia frase na nuvem
+  e a outra metade local — soaria como duas pessoas terminando a mesma frase
+- Só **cobra depois** do áudio chegar: falha de rede não consome cota
+- Ao acabar, cai para o Piper — que é o "local como opção B"
+
+O contador persiste em `state/voz_orcamento.json` e sobrevive a reinício.
+
+### Quando a nuvem falha
+
+O motor que falhar fica **de castigo por 2 minutos**. Sem isso, uma internet
+instável faria cada frase pagar o timeout da nuvem antes de cair para o local, e
+a resposta inteira ficaria arrastada.
 
 ---
 
@@ -729,7 +796,7 @@ por voz sai **uma vez**, não a cada turno.
 ## Testes
 
 ```bash
-python -m pytest tests/ -q          # 814 testes
+python -m pytest tests/ -q          # 844 testes
 ```
 
 | Arquivo | O que cobre |
@@ -768,6 +835,7 @@ python -m pytest tests/ -q          # 814 testes
 | `test_check_hardware.py` | Ausente vs quebrado, alinhamento, veredito |
 | `test_catalogo_completo.py` | O catálogo monta; todo handler degrada com lixo |
 | `test_wake_listener.py` | Reagrupamento de frames, tamanho exigido pelo Porcupine |
+| `test_voz_cadeia.py` | Orçamento de caracteres, queda para o local, API real |
 | `test_hotkey.py` | Interpretação do atalho |
 
 ---

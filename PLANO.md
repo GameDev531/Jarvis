@@ -27,10 +27,11 @@ descreve por que as coisas são como são e o que falta.
 | 14 — Modos e gestos | ✅ | Recursos contínuos ligam sob comando; webcam e gestos dentro disso |
 | 15 — Interface holográfica | ✅ | Desenho do usuário portado, servido como modo, ligado ao estado real |
 | 16 — Projeção holográfica | ✅ | Shader, catálogo curado de 14 assuntos, cascata com tetos |
-| 17 — Wake word própria | ⬜ | Treino de "James" via openWakeWord |
-| 18 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
+| 17 — Voz na nuvem | ✅ | Cadeia ElevenLabs → Piper, orçamento de caracteres |
+| 18 — Wake word própria | ⬜ | Treino de "James" via openWakeWord |
+| 19 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
 
-**814 testes automatizados.** Nada de Porcupine, Piper, whisper.cpp, Qt ou
+**844 testes automatizados.** Nada de Porcupine, Piper, whisper.cpp, Qt ou
 câmera foi executado em hardware real ainda — a Fase 0 existe para isso.
 
 ---
@@ -777,6 +778,94 @@ o que fecha essa lacuna, e é por isso que ela existe.
 O que continua baixo é o que precisa de hardware ou de Qt na tela: captura de
 áudio, reprodução, janelas. Cobrir isso exige dublês pesados que testariam mais
 o dublê que o código.
+
+---
+
+## Fase 17 — Voz na nuvem, local como reserva (feita)
+
+`james/voice/chain.py`, `elevenlabs_tts.py`, `budget.py`.
+
+A Fase 0 na máquina de destino deu o veredito: Sandy Bridge de 2011, 7,9 GB de
+RAM, rede de 1938 ms. O caminho local continua correto como destino, mas não
+como ponto de partida — daí a inversão: **nuvem primeiro, local como opção B**,
+para quando a máquina melhorar.
+
+### A economia, que é a premissa de tudo
+
+Você formulou assim, e está certo: o OpenRouter não manda a conversa para a
+ElevenLabs. Ele produz a frase final, e só ela é sintetizada.
+
+```
+"que horas são"
+   → Gemini transcreve             requisição
+   → OpenRouter decide e escreve   requisição
+   → "São duas da tarde, senhor."
+        └─ 26 caracteres: é só isto que a voz cobra
+```
+
+Raciocínio, histórico, resultado de busca e descrição de imagem ficam **fora**
+da cota de voz. É o que faz 10.000 caracteres por mês renderem umas 60
+respostas em vez de acabarem numa conversa.
+
+Isso é uma propriedade do código, não uma intenção, e por isso tem teste:
+`test_a_voz_recebe_so_a_frase_final` quebra se alguém um dia passar o histórico
+para a camada de voz.
+
+### Duas escolhas que dobram o que a cota rende
+
+**`eleven_flash_v2_5`** custa metade dos créditos por caractere e tem a menor
+latência do catálogo (~75 ms). Numa máquina modesta com internet lenta, os dois
+lados importam. A qualidade fica um pouco abaixo do `multilingual_v2` — é a
+troca, e ela é consciente.
+
+**`pcm_16000`** em vez do MP3 padrão da API. O áudio já chega em 16 kHz mono
+16 bits, exatamente o formato do microfone, do VAD e do reprodutor. MP3 exigiria
+um decodificador — mais uma dependência, mais CPU e mais latência, tudo para
+voltar ao PCM que já podíamos ter pedido. O 44.1 kHz exigiria plano Pro; o de
+16 kHz, não.
+
+### O contador é o que torna o plano grátis usável
+
+Sem ele, o pior acontece em silêncio: o James fala bem por três dias, a cota
+acaba, e ele emudece com um 401 genérico no meio de um turno.
+
+- **Pergunta antes** (`cabe`), em vez de tentar e falhar. Evita sintetizar meia
+  frase na nuvem e a outra metade local, o que soaria como duas pessoas
+  terminando a mesma frase.
+- **Cobra depois** do áudio chegar. Falha de rede não consome cota que a
+  ElevenLabs não cobrou.
+- **Avisa em 80%**, para dar tempo de decidir antes de acabar.
+- **Cai para o Piper** ao esgotar — e a troca é audível, que é um indicador
+  melhor que qualquer log.
+
+A unidade é caractere, não requisição. O `RateLimiter` do LLM conta requisições
+porque é assim que Gemini e OpenRouter cobram; misturar as duas contas daria um
+número que não corresponde a nada. Uma frase de 500 caracteres custa o mesmo
+que cinco de 100.
+
+### Castigo de dois minutos
+
+Um motor que falha sai da cadeia por 120 s. Sem isso, uma rede instável faria
+**cada frase** pagar o timeout da nuvem antes de cair para o Piper, e a resposta
+inteira ficaria arrastada.
+
+### O que não mudou
+
+O contrato de um motor de voz continua sendo duas coisas: `synthesize(texto)` e
+`sample_rate`. A cadeia expõe o mesmo, então `Speaker`, `AudioPlayer` e o
+orquestrador não souberam da mudança — só o `_build_tts` trocou de conteúdo.
+
+Um detalhe que quase passou: `sample_rate` precisa acompanhar **quem
+sintetizou**, não a cadeia. ElevenLabs entrega 16 kHz e o Piper 22050; como a
+troca pode acontecer entre duas frases da mesma resposta, uma taxa fixa
+aceleraria ou arrastaria a voz na metade da fala.
+
+### Verificado contra um servidor HTTP de verdade
+
+Os testes do provedor sobem um `ThreadingHTTPServer` que imita a API, em vez de
+usar dublê. Assim o `httpx`, os cabeçalhos, o `output_format` na query e o corpo
+JSON são exercitados de verdade — inclusive 401, 429, áudio vazio e resposta
+com número ímpar de bytes (meia amostra vira estalo alto no alto-falante).
 
 ---
 

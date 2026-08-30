@@ -95,6 +95,39 @@ llm:
   local_router:
     enabled: true             # casa comandos frequentes sem gastar requisição
 
+# ---------------------------------------------------------------------------
+# VOZ — cadeia de motores, nuvem primeiro
+# ---------------------------------------------------------------------------
+# Mesmo desenho de `llm.roles`: uma lista em ordem de preferência, e quem
+# estiver de pé assume. A troca é audível — você percebe pela voz qual motor
+# está falando.
+#
+#   [elevenlabs, piper]  nuvem, com o local de reserva  (padrão)
+#   [piper]              só local, tudo offline
+#   [elevenlabs]         só nuvem; ao acabar a cota, o James fica mudo
+voz:
+  cadeia: [elevenlabs, piper]
+
+  elevenlabs:
+    # O plano grátis dá 10.000 caracteres POR MÊS. Como só a frase final é
+    # sintetizada — raciocínio, histórico e busca ficam de fora —, isso rende
+    # umas 60 respostas. O contador avisa em 80% e a cadeia cai para o Piper
+    # ao acabar, em vez de o James emudecer sem explicação.
+    caracteres_por_mes: 10000
+    # A ElevenLabs zera na data da sua assinatura, não no dia 1º. Ajuste aqui
+    # se quiser que o contador acompanhe.
+    dia_da_virada: 1
+
+    # eleven_flash_v2_5 custa METADE dos créditos por caractere e tem a menor
+    # latência (~75 ms). A qualidade fica um pouco abaixo do multilingual_v2 —
+    # é a troca, e ela dobra o que a cota rende.
+    modelo: eleven_flash_v2_5
+    voice_id: ""              # vazio = voz padrão multilíngue do catálogo
+    timeout_s: 30
+    estabilidade: 0.5         # 0 = mais expressivo, 1 = mais constante
+    similaridade: 0.75
+    velocidade: 1.0
+
 tts:
   engine: piper
   # Baixe uma voz pt_BR em https://huggingface.co/rhasspy/piper-voices
