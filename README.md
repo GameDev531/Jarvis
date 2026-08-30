@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 16 implementadas. 786 testes automatizados.
+**Estado atual:** Fases 0 a 16 implementadas. 814 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -729,7 +729,7 @@ por voz sai **uma vez**, não a cada turno.
 ## Testes
 
 ```bash
-python -m pytest tests/ -q          # 786 testes
+python -m pytest tests/ -q          # 814 testes
 ```
 
 | Arquivo | O que cobre |
@@ -766,6 +766,8 @@ python -m pytest tests/ -q          # 786 testes
 | `test_holograma.py` | Ferramenta de projeção, cache de modelos, tetos, GLB gerado |
 | `test_repo_integrity.py` | Nenhum código-fonte ignorado pelo git; pacotes rastreados |
 | `test_check_hardware.py` | Ausente vs quebrado, alinhamento, veredito |
+| `test_catalogo_completo.py` | O catálogo monta; todo handler degrada com lixo |
+| `test_wake_listener.py` | Reagrupamento de frames, tamanho exigido pelo Porcupine |
 | `test_hotkey.py` | Interpretação do atalho |
 
 ---

@@ -30,7 +30,7 @@ descreve por que as coisas são como são e o que falta.
 | 17 — Wake word própria | ⬜ | Treino de "James" via openWakeWord |
 | 18 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
 
-**786 testes automatizados.** Nada de Porcupine, Piper, whisper.cpp, Qt ou
+**814 testes automatizados.** Nada de Porcupine, Piper, whisper.cpp, Qt ou
 câmera foi executado em hardware real ainda — a Fase 0 existe para isso.
 
 ---
@@ -695,6 +695,88 @@ Registrados aqui porque mudam premissas, e não são bugs:
 - **Rede de 1938 ms de conexão** (1593 ms para subir 100 KB). Isso ameaça a
   meta de 3,5 s e reabre a decisão E2: com essa latência, o roteador local em
   paralelo deixa de ser opcional e passa a valer bastante.
+
+---
+
+## Auditoria de código (feita)
+
+Pedida depois de dois bugs seguidos da mesma classe — "funciona na minha
+máquina". A varredura foi ampla de propósito; o resultado é mais tranquilo do
+que aqueles dois bugs sugeriam, e a conclusão está no fim.
+
+### O que foi verificado, e passou
+
+| Verificação | Resultado |
+|---|---|
+| Os 90 módulos importam | ✅ (com PySide6 instalado; 7 de UI nunca tinham sido carregados aqui) |
+| `open()` de texto sem `encoding=` | ✅ nenhum — no Windows viraria cp1252 e corromperia acento |
+| `subprocess` com `shell=True` | ✅ nenhum |
+| Saída do whisper.cpp | ✅ decodifica UTF-8 explícito, com `errors="replace"` e `CREATE_NO_WINDOW` |
+| `except` que engole em silêncio | ✅ 32 encontrados, todos fluxo normal (`queue.Empty`, `socket.timeout`) ou documentados com `noqa` |
+| Handlers com argumento vazio | ✅ os 37 devolvem `ToolResult`, nenhum estoura |
+| Handlers com tipo errado | ✅ nulo, número, lista, objeto, campo inexistente, texto de 5 000 chars |
+| Guard ↔ catálogo | ✅ sem órfão nos dois sentidos |
+| Schemas JSON | ✅ todos válidos, sem `enum` vazio, `required` sempre em `properties` |
+
+### O achado principal: 786 testes verdes, e a cola sem nenhum
+
+A medição de cobertura deu o resultado desconfortável:
+
+```
+james/tools/apps.py         0%     james/tools/memory.py       0%
+james/tools/knowledge.py    0%     james/tools/vision.py       0%
+james/tools/web.py          0%     james/tools/research.py     0%
+james/tools/investing.py    0%     james/runtime/wake_listener 0%
+```
+
+**Nenhum teste chamava um handler de ferramenta.** A suíte cobria o guard (que
+decide se pode), os armazéns de memória (que guardam), o cliente de LLM (que
+fala com a nuvem) — mas não a cola entre eles, que é exatamente onde o modelo
+encosta no sistema. `build_registry` também nunca era chamado: um erro no
+registro de qualquer ferramenta passaria pela suíte inteira e só apareceria
+quando alguém rodasse o James.
+
+Isso é a mesma lição do bug do `james/state/`, em outra roupa: a suíte
+respondia "as peças funcionam" e ninguém perguntava "elas se encaixam".
+
+`tests/test_catalogo_completo.py` cobre isso agora — monta o catálogo como o
+orquestrador monta e submete cada handler a argumento vazio e a seis formatos
+de lixo. Cobertura das ferramentas foi de 0% para 30–100%.
+
+### Um alarme falso, e uma fragilidade real por trás dele
+
+Achei que o `_FrameRechunker` recebia o frame de 30 ms do webrtcvad (480
+amostras) quando o Porcupine exige 512, o que quebraria a palavra de ativação
+inteira. **Não é bug:** o `WakeListener` sobrescreve o `audio_format` com os
+valores do próprio Porcupine, e 512 amostras a 16 kHz dão 32 ms redondos. A
+conta fecha.
+
+Mas a verificação expôs algo real: o número exigido é *exato* (512 amostras) e
+estava sendo derivado de volta através de `frame_ms`, um inteiro de
+milissegundos — um intermediário com perda. A 22050 Hz daria 507, o Porcupine
+rejeitaria todos os frames, e nada no caminho perceberia, porque a conta
+*parece* certa. O listener agora guarda `frame_bytes` direto de
+`porcupine.frame_length`, sem passar por milissegundos.
+
+Não estava quebrado. Estava a uma mudança de modelo de quebrar em silêncio.
+
+### O que a auditoria não cobre
+
+Continua sem execução real de Porcupine, Piper, whisper.cpp, microfone e
+câmera — nenhum deles existe neste ambiente. A Fase 0 na máquina de destino é
+o que fecha essa lacuna, e é por isso que ela existe.
+
+### Cobertura por camada, depois da auditoria
+
+| Camada | Antes | Depois |
+|---|---|---|
+| `tools/` | 0–48% | 30–100% |
+| `runtime/wake_listener.py` | 0% | lógica pura coberta |
+| Total | 55% | 59% |
+
+O que continua baixo é o que precisa de hardware ou de Qt na tela: captura de
+áudio, reprodução, janelas. Cobrir isso exige dublês pesados que testariam mais
+o dublê que o código.
 
 ---
 

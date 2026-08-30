@@ -76,6 +76,21 @@ class WakeListener:
             frame_ms=int(round(self.porcupine.frame_length * 1000 / self.porcupine.sample_rate)),
         )
 
+        # O Porcupine exige um número EXATO de amostras por chamada, e derivar
+        # esse número de volta a partir de `frame_ms` passa por milissegundos
+        # inteiros — um intermediário com perda. Hoje fecha (512 amostras a
+        # 16 kHz dão 32 ms redondos), mas a 22050 Hz daria 507 e o Porcupine
+        # rejeitaria todos os frames, sem que nada aqui percebesse.
+        #
+        # Guardar o valor exato tira o arredondamento do caminho.
+        self.frame_bytes = self.porcupine.frame_length * 2   # 16-bit mono
+        if self.frame_bytes != self.audio_format.frame_bytes:
+            logger.warning(
+                "Frame do Porcupine (%d amostras) não cai num número redondo de "
+                "milissegundos; usando o valor exato.",
+                self.porcupine.frame_length,
+            )
+
         self.server = IpcServer(
             host=str(config.get("ipc.host", "127.0.0.1")),
             port=int(config.get("ipc.port", 47821)),
@@ -225,7 +240,9 @@ class WakeListener:
     def _listen_loop(self) -> None:
         import numpy as np
 
-        rechunker = _FrameRechunker(self.audio_format.frame_bytes)
+        # `self.frame_bytes`, não `audio_format.frame_bytes`: ver o comentário
+        # no __init__ sobre o arredondamento em milissegundos.
+        rechunker = _FrameRechunker(self.frame_bytes)
         device = self.config.get("audio.input_device")
 
         while self._running.is_set():

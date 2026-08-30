@@ -54,7 +54,8 @@ pytestmark = pytest.mark.skipif(
 
 def _git(*args: str) -> str:
     resultado = subprocess.run(
-        ["git", *args], cwd=RAIZ, capture_output=True, text=True, timeout=30
+        ["git", *args], cwd=RAIZ, capture_output=True, text=True,
+        encoding="utf-8", timeout=30
     )
     return resultado.stdout
 
@@ -94,6 +95,7 @@ def test_nenhum_arquivo_de_codigo_esta_sendo_ignorado():
         input="\n".join(relativos),
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=30,
     )
     ignorados = [linha for linha in resultado.stdout.splitlines() if linha.strip()]
