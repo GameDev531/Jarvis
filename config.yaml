@@ -87,24 +87,49 @@ llm:
     # modelos :free — 50/dia sem crédito, 1.000/dia com US$ 10 vitalícios,
     # 20/min sempre. A lista abaixo protege contra o 429 momentâneo de um
     # modelo; ela NÃO multiplica a cota diária.
+    #
+    # O que a lista realmente compra, e não é pouco:
+    #   1. o teto de 20/min é por modelo — espalhar ajuda em rajada;
+    #   2. um modelo específico fora do ar não derruba o James;
+    #   3. o catálogo :free MUDA. Em agosto/2026 o OpenRouter tirou o tier
+    #      grátis inteiro da Meta e da Qwen de uma vez. Esta lista já apontava
+    #      para dois modelos mortos por causa disso.
+    #
+    # Um ID removido devolve 404. O provedor agora o descarta na primeira vez
+    # (ver `_descartar` em llm/openrouter_provider.py) em vez de tentar de novo
+    # a cada requisição — mas o certo é conferir de tempos em tempos:
+    #   python check_modelos.py
     enabled: true
     timeout_s: 60
     cooldown_s: 60            # tempo que um modelo fica em resfriamento após 429
     temperature: 0.7
     max_output_tokens: 1200
+    # Ordem = preferência. Rápido primeiro, porque o caminho de voz tem meta de
+    # 3,5 s; os modelos grandes ficam atrás, como reserva de qualidade.
+    #
+    # TODO o papel de raciocínio chama ferramentas, então todo modelo aqui
+    # precisa aceitar `tools`/`tool_choice`. Um modelo sem isso não "responde
+    # pior": ele ignora as ferramentas em silêncio e o James vira um chat.
     models:
-      - meta-llama/llama-3.3-70b-instruct:free
-      - qwen/qwen-2.5-72b-instruct:free
-      - deepseek/deepseek-chat-v3-0324:free
-      - google/gemma-2-9b-it:free
-      - mistralai/mistral-7b-instruct:free
+      - inclusionai/ling-3.0-flash-fin:free    # 124B MoE, 5,1B ativos — o mais rápido
+      - z-ai/glm-5.2:free                      # generalista forte, 256k
+      - minimax/minimax-m2.7:free              # agêntico, bom com ferramentas
+      - dots-studio/dots-3-note-preview:free   # 280B/16B ativos, 512k, também enxerga
+      - nvidia/nemotron-3-ultra-550b-a55b:free # o maior — lento, guardado para o difícil
+      - cohere/north-mini-code:free            # especialista em código e terminal
+
     # Modelos do catálogo :free que enxergam imagem. Mandar imagem para um
     # modelo de texto devolve erro ou, pior, uma alucinação sobre algo que ele
     # não viu — por isso a lista é separada.
+    #
+    # O Nemotron Nano Omni aceita texto, imagem, vídeo E áudio de entrada, e
+    # devolve texto. Ele NÃO gera imagem — nenhum modelo desta lista gera. Para
+    # o James isso ainda é ganho: a visão deixa de depender só do Gemini.
     vision_models:
+      - nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+      - dots-studio/dots-3-note-preview:free
       - google/gemma-3-27b-it:free
       - google/gemma-3-12b-it:free
-      - meta-llama/llama-3.2-11b-vision-instruct:free
 
   # Cotas separadas: os dois provedores têm limites independentes, e tratá-los
   # como um balde só desperdiçaria metade da capacidade diária.

@@ -40,6 +40,20 @@ logger = get_logger("james.llm.openrouter")
 _ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 _DONE = "[DONE]"
 
+# Um modelo removido do catálogo devolve 404 e vai devolver 404 para sempre.
+# Sem isto ele seria retentado a cada requisição, custando uma viagem de rede
+# inteira antes de chegar ao primeiro modelo vivo — e o catálogo `:free` do
+# OpenRouter muda de mês para mês, então isso não é hipótese.
+_MODELO_INEXISTENTE_S = 24 * 60 * 60
+
+
+class ModeloInexistente(ProviderError):
+    """404: o ID saiu do catálogo. Continua sendo `ProviderError` de propósito.
+
+    Quem chama e não conhece esta classe segue tratando como falha comum e
+    passa para o próximo modelo — o comportamento correto de qualquer jeito.
+    """
+
 
 class OpenRouterProvider:
     name = "openrouter"
@@ -93,9 +107,25 @@ class OpenRouterProvider:
     def _available_models(self) -> list[str]:
         return self._available_from(self.models)
 
-    def _mark_cooldown(self, model: str) -> None:
-        self._cooldown[model] = time.monotonic() + self.cooldown_s
-        logger.info("Modelo %s em resfriamento por %ds.", model, self.cooldown_s)
+    def _mark_cooldown(self, model: str, seconds: float | None = None) -> None:
+        espera = self.cooldown_s if seconds is None else float(seconds)
+        self._cooldown[model] = time.monotonic() + espera
+        logger.info("Modelo %s em resfriamento por %.0fs.", model, espera)
+
+    def _descartar(self, model: str, motivo: str) -> None:
+        """Tira de circulação um modelo que não existe mais no catálogo.
+
+        Diferente do 429, que é temporário, um 404 é permanente: o ID saiu do
+        catálogo. Retentá-lo a cada requisição gastaria uma viagem de rede
+        inteira por vez — e numa conexão de ~2 s isso sozinho estoura a meta de
+        3,5 s do caminho de voz antes mesmo de um modelo vivo ser consultado.
+        """
+        self._cooldown[model] = time.monotonic() + _MODELO_INEXISTENTE_S
+        logger.error(
+            "Modelo %s não existe no catálogo do OpenRouter (%s). Fora de uso "
+            "nesta sessão — remova do config.yaml.",
+            model, motivo,
+        )
 
     # ------------------------------------------------------------ requisição
 
@@ -131,6 +161,9 @@ class OpenRouterProvider:
                 return self._stream_one(dict(payload, model=model), model, on_text)
             except QuotaExceeded as exc:
                 self._mark_cooldown(model)
+                last_error = exc
+            except ModeloInexistente as exc:
+                self._descartar(model, str(exc))
                 last_error = exc
             except ProviderError as exc:
                 logger.warning("Modelo %s falhou: %s", model, exc)
@@ -194,6 +227,9 @@ class OpenRouterProvider:
             except QuotaExceeded as exc:
                 self._mark_cooldown(model)
                 last_error = exc
+            except ModeloInexistente as exc:
+                self._descartar(model, str(exc))
+                last_error = exc
             except ProviderError as exc:
                 logger.warning("Modelo de visão %s falhou: %s", model, exc)
                 last_error = exc
@@ -240,6 +276,8 @@ class OpenRouterProvider:
                         )
                         if looks_like_quota_error(error):
                             raise QuotaExceeded(str(error)) from error
+                        if response.status_code == 404:
+                            raise ModeloInexistente(str(error)) from error
                         raise error
 
                     for event in _iter_sse(response.iter_lines()):

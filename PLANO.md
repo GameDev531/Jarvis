@@ -32,7 +32,7 @@ descreve por que as coisas são como são e o que falta.
 | 19 — Wake word "James" própria | ⬜ | Treino do modelo pelo openWakeWord |
 | 20 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
 
-**865 testes automatizados.** Piper, whisper.cpp, Qt e câmera continuam sem
+**886 testes automatizados.** Piper, whisper.cpp, Qt e câmera continuam sem
 execução em hardware real — a Fase 0 existe para isso. O openWakeWord é a
 exceção: o motor foi carregado de verdade neste ambiente (modelo `hey_jarvis`,
 ~14 MB baixados, 2,4% de um núcleo em escuta contínua num processador
@@ -799,6 +799,36 @@ Duas consequências que valem registro:
 
 Os modelos pré-treinados do openWakeWord são CC-BY-NC-SA 4.0 (não comercial).
 Para uso pessoal está certo; virando produto, é preciso treinar os próprios.
+
+### O catálogo `:free` do OpenRouter é uma dependência que se move sozinha
+
+Ao trocar a lista de modelos, a verificação contra o catálogo vivo revelou que
+**dois dos cinco modelos de raciocínio não existiam mais**: em agosto de 2026 o
+OpenRouter removeu o tier grátis inteiro da Meta e da Qwen de uma vez.
+`meta-llama/llama-3.3-70b-instruct:free` e `qwen/qwen-2.5-72b-instruct:free`
+estavam no `config.yaml`, e o terceiro morto, o
+`meta-llama/llama-3.2-11b-vision-instruct:free`, era **metade** da lista de
+visão.
+
+O interessante é o modo de falha. Nada quebrava: a cadeia caía para o próximo
+modelo e o James respondia normalmente. Só que cada requisição gastava duas
+viagens de rede levando 404 antes de chegar a um modelo vivo — e numa conexão
+de ~1.900 ms isso sozinho consome a meta de 3,5 s do caminho de voz. Um erro
+que só se manifesta como lentidão é um erro que ninguém rastreia até o config.
+
+Três coisas mudaram por causa disso:
+
+- **404 é permanente, 429 é temporário.** O provedor tratava os dois como
+  "falha, tenta o próximo". Agora um 404 põe o modelo fora de uso pela sessão
+  (`_descartar`), então um ID morto custa uma viagem de rede, não uma por
+  requisição.
+- **`check_modelos.py`** pergunta ao catálogo quais IDs existem e compara com o
+  config. Não precisa de chave — `/models` é público. Nenhuma leitura de código
+  poderia responder isso, porque a resposta está fora do repositório.
+- **Trava contra modelo pago.** A única diferença entre `z-ai/glm-5.2` e
+  `z-ai/glm-5.2:free` é o sufixo. Esquecê-lo não gera erro, não gera log e não
+  aparece em teste nenhum — aparece na fatura. Agora um teste recusa qualquer
+  ID sem `:free` no config.
 
 ### O que a auditoria não cobre
 

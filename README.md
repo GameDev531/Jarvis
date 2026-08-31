@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 18 implementadas. 865 testes automatizados.
+**Estado atual:** Fases 0 a 18 implementadas. 886 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -821,6 +821,26 @@ entre todos eles** — 50/dia sem crédito, 1.000/dia com US$ 10 vitalícios,
 multiplica a cota diária. Aqueles US$ 10 únicos são o melhor custo-benefício do
 stack inteiro.
 
+### O catálogo `:free` muda — confira de vez em quando
+
+```bash
+python check_modelos.py
+```
+
+Ele pergunta ao OpenRouter quais modelos existem agora e compara com o
+`config.yaml`. Não precisa de chave (o endpoint `/models` é público).
+
+Isto não é zelo excessivo: em **agosto de 2026 o OpenRouter removeu o tier
+grátis inteiro da Meta e da Qwen de uma vez**, e o config do James ficou
+apontando para dois modelos mortos. O sintoma era traiçoeiro — nada quebrava,
+porque a cadeia caía para o próximo. Só que cada requisição passava a gastar
+duas viagens de rede levando 404 antes de chegar a um modelo vivo. O James
+ficava lento, e o `config.yaml` era o último lugar onde alguém procuraria.
+
+O provedor agora descarta um ID que devolve 404 na primeira vez, em vez de
+insistir nele a cada requisição. Rode o `check_modelos.py` se o James começar a
+demorar mais do que costumava.
+
 ---
 
 ## Modo degradado
@@ -842,7 +862,7 @@ por voz sai **uma vez**, não a cada turno.
 ## Testes
 
 ```bash
-python -m pytest tests/ -q          # 865 testes
+python -m pytest tests/ -q          # 886 testes
 ```
 
 | Arquivo | O que cobre |
@@ -879,6 +899,7 @@ python -m pytest tests/ -q          # 865 testes
 | `test_holograma.py` | Ferramenta de projeção, cache de modelos, tetos, GLB gerado |
 | `test_repo_integrity.py` | Nenhum código-fonte ignorado pelo git; pacotes rastreados |
 | `test_check_hardware.py` | Ausente vs quebrado, alinhamento, veredito |
+| `test_check_models.py` | Catálogo vivo × config, rede fora ≠ modelo morto |
 | `test_catalogo_completo.py` | O catálogo monta; todo handler degrada com lixo |
 | `test_wake_listener.py` | Reagrupamento de frames, tamanho exigido pelo motor |
 | `test_wake_engines.py` | Contrato dos três motores, ordem da fábrica, debounce |
@@ -891,6 +912,7 @@ python -m pytest tests/ -q          # 865 testes
 
 ```
 check_hardware.py     Fase 0
+check_modelos.py      confere os modelos do OpenRouter contra o catálogo vivo
 wake_listener.py      processo 1 (o que você inicia)
 main.py               processo 2 (iniciado pelo processo 1)
 set_pin.py            PIN de confirmação

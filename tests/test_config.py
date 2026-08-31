@@ -123,3 +123,58 @@ def test_um_teste_pode_definir_a_propria_chave(monkeypatch):
     """O isolamento não pode impedir quem precisa de uma chave de verdade."""
     monkeypatch.setenv("GEMINI_API_KEY", "chave-do-proprio-teste")
     assert get_secret("GEMINI_API_KEY") == "chave-do-proprio-teste"
+
+
+# ---------------------------------------------- modelos do OpenRouter no config
+
+# O catálogo `:free` muda sozinho e o config não fica sabendo. Estes testes não
+# conseguem (nem devem) falar com a rede — quem confere se um ID ainda existe é
+# o `check_modelos.py`. O que dá para garantir aqui é a forma da lista, que é
+# onde mora o erro caro.
+
+def _openrouter_do_config():
+    from james.config import load_config
+    return load_config().section("llm.openrouter")
+
+
+def test_todo_modelo_do_openrouter_e_gratuito():
+    """Um ID sem `:free` é um modelo PAGO, e ele não avisa.
+
+    O sufixo é a única diferença entre `z-ai/glm-5.2` e `z-ai/glm-5.2:free`.
+    Esquecê-lo não quebra nada, não gera erro e não aparece em log nenhum —
+    só aparece na fatura. A regra do projeto é custo zero, e ela precisa de
+    uma trava, não de atenção.
+    """
+    secao = _openrouter_do_config()
+    todos = list(secao.get("models") or []) + list(secao.get("vision_models") or [])
+    pagos = [m for m in todos if not str(m).endswith(":free")]
+    assert not pagos, f"modelos pagos no config: {pagos}"
+
+
+def test_ha_modelo_para_os_dois_papeis():
+    """Lista vazia derruba o papel inteiro em toda requisição."""
+    secao = _openrouter_do_config()
+    assert secao.get("models"), "llm.openrouter.models está vazio"
+    assert secao.get("vision_models"), "llm.openrouter.vision_models está vazio"
+
+
+def test_sem_modelo_repetido_na_mesma_lista():
+    """Repetido não dá erro — só desperdiça uma posição da cadeia de reserva."""
+    secao = _openrouter_do_config()
+    for nome in ("models", "vision_models"):
+        lista = [str(m) for m in (secao.get(nome) or [])]
+        assert len(lista) == len(set(lista)), f"{nome} tem modelo repetido"
+
+
+def test_modelos_removidos_do_catalogo_nao_voltam():
+    """Regressão de agosto/2026: o OpenRouter removeu o tier grátis inteiro da
+    Meta e da Qwen, e estes IDs ficaram no config devolvendo 404 em silêncio."""
+    secao = _openrouter_do_config()
+    todos = {str(m) for m in
+             list(secao.get("models") or []) + list(secao.get("vision_models") or [])}
+    mortos = {
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "qwen/qwen-2.5-72b-instruct:free",
+        "meta-llama/llama-3.2-11b-vision-instruct:free",
+    }
+    assert not (todos & mortos), f"IDs removidos do catálogo: {todos & mortos}"

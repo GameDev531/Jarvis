@@ -152,3 +152,96 @@ def test_json_quebrado_vira_dicionario_vazio():
 def test_json_que_nao_e_objeto_vira_dicionario_vazio():
     assert _parse_arguments('["chrome"]') == {}
     assert _parse_arguments('"chrome"') == {}
+
+
+# ------------------------------------------- modelo que saiu do catálogo
+
+# O catálogo `:free` do OpenRouter muda sozinho: em agosto de 2026 o tier
+# grátis inteiro da Meta e da Qwen foi removido de uma vez, e o config do James
+# ficou apontando para dois modelos mortos. Eles não quebravam nada — só
+# devolviam 404 e cediam a vez ao próximo. O custo era invisível: uma viagem de
+# rede inteira desperdiçada POR REQUISIÇÃO, para sempre. Numa conexão de ~2 s,
+# dois IDs mortos no topo da lista sozinhos estouram a meta de 3,5 s da voz.
+
+import pytest
+
+from james.llm.base import ProviderError, QuotaExceeded
+from james.llm.history import Conversation
+from james.llm.openrouter_provider import ModeloInexistente, OpenRouterProvider
+
+
+def provider(models, **kwargs):
+    return OpenRouterProvider(api_key="k", models=list(models), **kwargs)
+
+
+def test_modelo_inexistente_continua_sendo_provider_error():
+    """Quem não conhece a classe precisa seguir tratando como falha comum."""
+    assert issubclass(ModeloInexistente, ProviderError)
+
+
+def test_404_tira_o_modelo_de_circulacao(monkeypatch):
+    p = provider(["morto:free", "vivo:free"])
+    tentados = []
+
+    def stream(payload, model, on_text):
+        tentados.append(model)
+        if model == "morto:free":
+            raise ModeloInexistente("404 model not found")
+        return "resposta"
+
+    monkeypatch.setattr(p, "_stream_one", stream)
+
+    assert p.generate(Conversation(), text="oi") == "resposta"
+    assert tentados == ["morto:free", "vivo:free"]
+
+    # A segunda requisição é o ponto do teste: o modelo morto não pode custar
+    # outra viagem de rede.
+    tentados.clear()
+    assert p.generate(Conversation(), text="de novo") == "resposta"
+    assert tentados == ["vivo:free"]
+
+
+def test_429_continua_sendo_temporario(monkeypatch):
+    """Cota estourada volta; catálogo removido não. Tratar igual desperdiçaria
+    um modelo bom pelo resto do dia."""
+    p = provider(["a:free", "b:free"], cooldown_s=0)
+
+    def stream(payload, model, on_text):
+        if model == "a:free":
+            raise QuotaExceeded("429")
+        return "ok"
+
+    monkeypatch.setattr(p, "_stream_one", stream)
+    p.generate(Conversation(), text="oi")
+    # cooldown_s=0: já saiu do resfriamento e volta para o começo da fila.
+    assert p._available_models()[0] == "a:free"
+
+
+def test_erro_comum_nao_descarta_o_modelo(monkeypatch):
+    """Um timeout não significa que o modelo deixou de existir."""
+    p = provider(["a:free", "b:free"])
+    chamadas = []
+
+    def stream(payload, model, on_text):
+        chamadas.append(model)
+        if model == "a:free":
+            raise ProviderError("timeout")
+        return "ok"
+
+    monkeypatch.setattr(p, "_stream_one", stream)
+    p.generate(Conversation(), text="oi")
+    chamadas.clear()
+    p.generate(Conversation(), text="de novo")
+    assert chamadas[0] == "a:free", "erro passageiro não tira o modelo da fila"
+
+
+def test_todos_mortos_ainda_levanta_erro_claro(monkeypatch):
+    p = provider(["x:free", "y:free"])
+    monkeypatch.setattr(
+        p, "_stream_one",
+        lambda payload, model, on_text: (_ for _ in ()).throw(
+            ModeloInexistente("404")
+        ),
+    )
+    with pytest.raises(QuotaExceeded, match="Nenhum modelo"):
+        p.generate(Conversation(), text="oi")
