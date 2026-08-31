@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 18 implementadas. 892 testes automatizados.
+**Estado atual:** Fases 0 a 18 implementadas. 896 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -204,6 +204,30 @@ holograma") ou por linha de comando (`python main.py --holograma`).
 A regra "modo nasce desligado" existe para recurso caro — câmera, CPU contínua.
 A holográfica não é nada disso, então deixá-la no `iniciar_com` é escolha sua,
 sem contrapartida.
+
+### Se a interface holográfica travar
+
+Ela se ajusta sozinha. O navegador mede o intervalo real entre quadros e, se a
+máquina não estiver segurando, baixa a qualidade em degraus:
+
+| Nível | Quadros | Densidade | Bloom |
+|---|---|---|---|
+| `alta` | 60 | até 1,5x | meia resolução |
+| `media` | 30 | 1x | 1/4 de resolução |
+| `baixa` | 30 | 1x | **desligado** (1 passe em vez de 5) |
+
+Para fixar um nível e parar a adaptação, no console do navegador (F12):
+
+```js
+localStorage.setItem('james.qualidade', 'baixa');  // e recarregue
+```
+
+A diferença visual entre `alta` e `baixa` é o halo em volta do brilho — o
+desenho é o mesmo. Numa GPU integrada é a diferença entre travar e rodar.
+
+Medido aqui, com um renderizador por software (que aproxima bem uma GPU fraca),
+o núcleo mais uma janela holográfica aberta: **25 fps antes das otimizações,
+34 depois** — mesma imagem, conferida pixel a pixel.
 
 ### Só quero ver as interfaces
 
@@ -892,7 +916,7 @@ por voz sai **uma vez**, não a cada turno.
 ## Testes
 
 ```bash
-python -m pytest tests/ -q          # 892 testes
+python -m pytest tests/ -q          # 896 testes
 ```
 
 | Arquivo | O que cobre |
@@ -926,6 +950,7 @@ python -m pytest tests/ -q          # 892 testes
 | `test_gestures.py` | Classificação com mão girada, debounce, câmera liberada |
 | `test_mode_tools.py` | Gesto recusado no Nível 2, ferramentas de modo, guard |
 | `test_web_interface.py` | Travessia de caminho, token, CSRF, barramento, modo holograma |
+| (no mesmo arquivo) | Ritmo de quadro por cena, sem antialias no núcleo, sem layout no laço |
 | `test_holograma.py` | Ferramenta de projeção, cache de modelos, tetos, GLB gerado |
 | `test_repo_integrity.py` | Nenhum código-fonte ignorado pelo git; pacotes rastreados |
 | `test_check_hardware.py` | Ausente vs quebrado, alinhamento, veredito |

@@ -460,3 +460,78 @@ def test_comando_da_interface_passa_pelo_guard_normal():
     # Um comando digitado vira um turno; se acabar em tool, o guard avalia igual.
     assert guard.evaluate("abrir_app", {"nome": "bloco de notas"}).decision is Decision.BLOCK
     assert guard.evaluate("abrir_app", {"nome": "chrome"}).decision is Decision.ALLOW
+
+
+# ------------------------------------------- desempenho da interface web
+
+# Este bloco existe por causa de um bug que só a comparação de IMAGEM pegou.
+#
+# O governador de qualidade é compartilhado entre as cenas (o núcleo e cada
+# janela holográfica), porque a máquina é uma só. Mas a primeira versão dele
+# guardava também o instante do último quadro nesse objeto compartilhado. O
+# resultado: a primeira cena a pedir permissão no quadro desenhava e carimbava
+# o relógio; a segunda levava "não, ainda não passou tempo" — e a janela
+# holográfica simplesmente parou de desenhar.
+#
+# Nenhum teste falhou. Nenhum erro no console. A medição de fps até MELHOROU,
+# porque uma das duas cenas havia sumido. Só comparar o pixel do globo antes e
+# depois revelou: 14,4% de ciano viraram 0,1%.
+#
+# Não há runner de JS no projeto, então o que dá para garantir aqui é
+# estrutural: a armadilha não pode voltar com o mesmo formato.
+
+import re
+from pathlib import Path
+
+WEB = Path(__file__).resolve().parent.parent / "ui" / "web"
+CENAS = ("core-scene.js", "holo-scene.js")
+
+
+def test_ritmo_de_quadro_e_por_cena():
+    """Cada cena precisa do próprio marcador de ritmo.
+
+    `criarRitmo()` devolve um fechamento com o relógio dele. Um método
+    `deveDesenhar` no governador seria estado compartilhado de novo — e é
+    exatamente assim que a janela holográfica parou de desenhar.
+    """
+    perf = (WEB / "perf.js").read_text(encoding="utf-8")
+    assert "criarRitmo" in perf
+    assert not re.search(r"^\s*deveDesenhar\s*\(", perf, re.M), (
+        "deveDesenhar de volta no governador: o ritmo virou estado compartilhado"
+    )
+
+    for nome in CENAS:
+        fonte = (WEB / nome).read_text(encoding="utf-8")
+        assert "criarRitmo()" in fonte, f"{nome} sem ritmo próprio"
+
+
+def test_toda_cena_respeita_o_teto_de_quadros():
+    """Uma cena que ignora o ritmo desfaz a economia das outras."""
+    for nome in CENAS:
+        fonte = (WEB / nome).read_text(encoding="utf-8")
+        assert "ritmo(" in fonte, f"{nome} desenha sem consultar o ritmo"
+
+
+def test_nucleo_nao_pede_antialias():
+    """A cena vai para um alvo de render; o framebuffer padrão só recebe um
+    quadrado de tela cheia. MSAA ali antisserrilha as bordas de um retângulo —
+    banda de memória gasta por nada, e banda é o gargalo numa GPU integrada."""
+    fonte = (WEB / "core-scene.js").read_text(encoding="utf-8")
+    assert "antialias: false" in fonte
+
+
+def _sem_comentarios(fonte: str) -> str:
+    """Tira /* */ e // — senão o teste acusa a própria explicação do bug."""
+    fonte = re.sub(r"/\*.*?\*/", "", fonte, flags=re.S)
+    return re.sub(r"//[^\n]*", "", fonte)
+
+
+def test_ninguem_le_clientWidth_dentro_do_laco():
+    """Ler `clientWidth` no laço força recálculo de layout a cada quadro, por
+    cena. O tamanho vem do ResizeObserver, que entrega o número já calculado."""
+    for nome in CENAS:
+        fonte = (WEB / nome).read_text(encoding="utf-8")
+        assert "observarTamanho" in fonte, f"{nome} não usa o observador"
+        assert "clientWidth" not in _sem_comentarios(fonte), (
+            f"{nome} ainda lê clientWidth em código"
+        )

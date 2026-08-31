@@ -2,10 +2,26 @@
    Portable to Next.js as coreScene.ts: createCoreScene(THREE, canvas) -> handle.
    Owns its renderer, camera orbit, palette morph and a 2-pass bloom composite. */
 
-export function createCoreScene(T, canvas) {
-  const renderer = new T.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+import { criarGovernador, observarTamanho } from './perf.js';
+
+export function createCoreScene(T, canvas, opcoes = {}) {
+  /* `antialias` fica FALSO de propósito, e isso não piora a imagem.
+     A cena inteira é desenhada para `rtScene`, um alvo de render sem
+     multisampling; o framebuffer padrão só recebe um quadrado de tela cheia
+     com essa textura colada. Pedir MSAA aqui aloca um buffer multiamostrado
+     para antisserrilhar as duas bordas de um retângulo — custo de banda de
+     memória por absolutamente nada. Numa GPU integrada, banda É o gargalo. */
+  const renderer = new T.WebGLRenderer({ canvas, alpha: true, antialias: false, powerPreference: 'high-performance' });
+
+  /* O governador pode baixar o nível sozinho, e aí os alvos de bloom e a
+     densidade de pixel precisam ser refeitos. `reaplicarQualidade` só existe
+     mais abaixo (depende do renderer montado), então o gancho é indireto. */
+  let aoTrocarQualidade = () => {};
+  const governador = opcoes.governador
+    || criarGovernador({ aoMudar: () => aoTrocarQualidade() });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, governador.perfil.dpr));
   renderer.autoClear = false;
+  const ritmo = governador.criarRitmo();
   const scene = new T.Scene();
   const camera = new T.PerspectiveCamera(38, 1, 0.1, 200);
   const root = new T.Group();
@@ -168,20 +184,34 @@ export function createCoreScene(T, canvas) {
   /* ================= loop ================= */
   let w = 0, h = 0, mix = 0, targetMix = 0, inten = 1, raf = 0, bloomBase = 0.95;
   const clock = new T.Clock();
-  const resize = () => {
-    const cw = canvas.clientWidth, ch = canvas.clientHeight;
-    if (!cw || !ch || (cw === w && ch === h)) return;
+
+  const aplicarTamanho = (cw, ch) => {
     w = cw; h = ch;
     renderer.setSize(w, h, false);
     camera.aspect = w / h; camera.updateProjectionMatrix();
     const s = renderer.getDrawingBufferSize(new T.Vector2());
     rtScene.setSize(s.x, s.y);
-    const hw = Math.max(2, Math.round(s.x / 2)), hh = Math.max(2, Math.round(s.y / 2));
+    /* O bloom é borrão: resolução plena nele é dinheiro jogado fora. A escala
+       vem do perfil de qualidade — 1/2 na alta, 1/4 quando a máquina não
+       segura, o que corta 75% dos pixels dos quatro passes de uma vez. */
+    const div = governador.perfil.escalaBloom;
+    const hw = Math.max(2, Math.round(s.x / div)), hh = Math.max(2, Math.round(s.y / div));
     rtA.setSize(hw, hh); rtB.setSize(hw, hh);
     blurH.uniforms.res.value.set(hw, hh); blurV.uniforms.res.value.set(hw, hh);
   };
-  window.addEventListener('resize', resize);
-  resize();
+
+  /* Antes isto era `resize()` chamado a cada quadro, lendo `clientWidth` — o
+     que força o navegador a recalcular o layout antes de responder, 60 vezes
+     por segundo, para descobrir um número que só muda quando a janela muda. */
+  const pararDeObservar = observarTamanho(canvas, aplicarTamanho);
+
+  /* Quando a qualidade cai, o tamanho dos alvos de bloom e a densidade de
+     pixel precisam ser refeitos — senão o nível novo não vale para nada. */
+  const reaplicarQualidade = () => {
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, governador.perfil.dpr));
+    if (w && h) aplicarTamanho(w, h);
+  };
+  aoTrocarQualidade = reaplicarQualidade;
 
   const paint = () => {
     const p = PAL.j, u = PAL.u;
@@ -195,13 +225,18 @@ export function createCoreScene(T, canvas) {
   };
   paint();
 
-  (function loop() {
+  (function loop(agora) {
     raf = requestAnimationFrame(loop);
-    resize();
     if (!w || !h) return;
+    if (!ritmo(agora || performance.now())) return;
+
     const t = clock.getElapsedTime();
+    const antes = mix;
     mix += (targetMix - mix) * 0.08;
-    paint();
+    /* `paint()` reescreve a cor de todos os materiais. Enquanto o mix está em
+       trânsito isso é necessário; depois que ele assenta, é o mesmo trabalho
+       produzindo o mesmo resultado, para sempre. */
+    if (Math.abs(mix - antes) > 1e-4) paint();
 
     cam.th += (cam.tth - cam.th) * 0.08; cam.ph += (cam.tph - cam.ph) * 0.08; cam.d += (cam.td - cam.d) * 0.08;
     const orbit = cam.th + t * (0.03 + mix * 0.05);
@@ -249,15 +284,23 @@ export function createCoreScene(T, canvas) {
 
     compMat.uniforms.str.value = bloomBase * (1 + mix * 0.55) + (inten - 1) * 0.4;
 
-    renderer.setRenderTarget(rtScene); renderer.clear(); renderer.render(scene, camera);
-    quad.material = brightMat; brightMat.uniforms.tex.value = rtScene.texture;
-    renderer.setRenderTarget(rtA); renderer.clear(); renderer.render(quadScene, quadCam);
-    quad.material = blurH; blurH.uniforms.tex.value = rtA.texture;
-    renderer.setRenderTarget(rtB); renderer.clear(); renderer.render(quadScene, quadCam);
-    quad.material = blurV; blurV.uniforms.tex.value = rtB.texture;
-    renderer.setRenderTarget(rtA); renderer.clear(); renderer.render(quadScene, quadCam);
-    quad.material = compMat; compMat.uniforms.sceneT.value = rtScene.texture; compMat.uniforms.bloomT.value = rtA.texture;
-    renderer.setRenderTarget(null); renderer.clear(); renderer.render(quadScene, quadCam);
+    if (!governador.perfil.bloom) {
+      /* Nível "baixa": um passe em vez de cinco. O brilho aditivo dos próprios
+         materiais continua ali — o que se perde é o halo em volta, não a
+         imagem. Numa GPU integrada essa é a diferença entre travar e rodar. */
+      renderer.setRenderTarget(null); renderer.clear(); renderer.render(scene, camera);
+    } else {
+      renderer.setRenderTarget(rtScene); renderer.clear(); renderer.render(scene, camera);
+      quad.material = brightMat; brightMat.uniforms.tex.value = rtScene.texture;
+      renderer.setRenderTarget(rtA); renderer.clear(); renderer.render(quadScene, quadCam);
+      quad.material = blurH; blurH.uniforms.tex.value = rtA.texture;
+      renderer.setRenderTarget(rtB); renderer.clear(); renderer.render(quadScene, quadCam);
+      quad.material = blurV; blurV.uniforms.tex.value = rtB.texture;
+      renderer.setRenderTarget(rtA); renderer.clear(); renderer.render(quadScene, quadCam);
+      quad.material = compMat; compMat.uniforms.sceneT.value = rtScene.texture; compMat.uniforms.bloomT.value = rtA.texture;
+      renderer.setRenderTarget(null); renderer.clear(); renderer.render(quadScene, quadCam);
+    }
+
   })();
 
   return {
@@ -265,13 +308,21 @@ export function createCoreScene(T, canvas) {
     setIntensity(v) { inten = v; },
     setBloom(v) { bloomBase = v; },
     resetView() { cam.tth = 0.3; cam.tph = 1.42; cam.td = 4.35; },
+    /* Deixa a interface mostrar e mudar o nível — a pessoa na frente da tela
+       às vezes prefere trocar brilho por fluidez antes de o medidor decidir. */
+    qualidade(nivel) {
+      if (nivel === undefined) return governador.nivel;
+      const mudou = governador.definir(nivel);
+      if (mudou) reaplicarQualidade();
+      return governador.nivel;
+    },
     dispose() {
       cancelAnimationFrame(raf);
       canvas.removeEventListener('pointerdown', onDown);
       canvas.removeEventListener('wheel', onWheel);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('resize', resize);
+      pararDeObservar();
       scene.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
       [rtScene, rtA, rtB].forEach(r => r.dispose());
       renderer.dispose();

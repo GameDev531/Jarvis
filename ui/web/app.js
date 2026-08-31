@@ -290,7 +290,23 @@ class App {
 
   /* --------------------------------------------------------------- pintura */
 
+  /* Repintar é caro: reconstrói umas 60 caixas do DOM do zero. Vários pontos
+   * chamam `paint()` em sequência — `log()` é o pior, e uma rajada de linhas
+   * (na conexão, por exemplo) virava uma rajada de reconstruções, todas
+   * descartadas menos a última.
+   *
+   * Juntar tudo num quadro faz N repinturas custarem uma. E amarrar ao rAF, em
+   * vez de a um temporizador, faz o trabalho acontecer quando o navegador vai
+   * desenhar de qualquer jeito — e parar sozinho com a aba escondida. */
   paint() {
+    if (this._pinturaAgendada) return;
+    this._pinturaAgendada = requestAnimationFrame(() => {
+      this._pinturaAgendada = 0;
+      this.pintarAgora();
+    });
+  }
+
+  pintarAgora() {
     const ult = this.mode === 'ultron';
     const ctx = CTX[this.active] || CTX.core;
     const acc = ult ? '#ff8a00' : '#00e5ff';
@@ -450,13 +466,31 @@ class App {
 
   /* ------------------------------------------------------------------ 3D */
 
+  /* Um governador para TODAS as cenas.
+   *
+   * O custo é somado: o núcleo mais cada janela holográfica aberta, cada um
+   * com seu contexto WebGL. Se cada cena medisse a si mesma, cada uma
+   * concluiria que está indo bem enquanto juntas travam a máquina — o quadro
+   * lento aparece em todas, mas nenhuma sozinha explica o porquê.
+   *
+   * Medindo em conjunto, quando a máquina não segura, todas baixam juntas. */
+  async governador() {
+    if (!this.perf) {
+      const { criarGovernador } = await import('./perf.js');
+      this.perf = criarGovernador({
+        aoMudar: (nivel) => this.log(`Qualidade reduzida para "${nivel}" — quadros lentos.`),
+      });
+    }
+    return this.perf;
+  }
+
   async mountCore() {
     const canvas = this.$canvas;
     if (!canvas) return;
     try {
       const { createCoreScene } = await import('./core-scene.js');
-      this.core = createCoreScene(THREE, canvas);
-      this.log('Motor volumétrico ativo · bloom aditivo');
+      this.core = createCoreScene(THREE, canvas, { governador: await this.governador() });
+      this.log(`Motor volumétrico ativo · qualidade ${this.perf.nivel}`);
     } catch (err) {
       this.log('Falha ao montar o núcleo 3D.');
       console.error(err);
@@ -467,6 +501,7 @@ class App {
     try {
       const { createHoloScene } = await import('./holo-scene.js');
       this.holos[k] = createHoloScene(THREE, GLTFLoader, canvas, subject, this.mode, {
+        governador: await this.governador(),
         cache: './models',
         // Cada resolução conta de onde o objeto veio. É o que deixa visível,
         // no próprio log da interface, qual nível da cascata respondeu.

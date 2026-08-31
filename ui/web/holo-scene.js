@@ -13,10 +13,19 @@
 
 import { CORES, createHolographicMaterial } from './holo-material.js';
 import { animarCatalogo, resolver } from './holo-resolver.js';
+import { criarGovernador, observarTamanho, observarVisibilidade } from './perf.js';
 
 export function createHoloScene(T, GLTFLoader, canvas, assunto, modo = 'jarvis', opcoes = {}) {
   const renderer = new T.WebGLRenderer({ canvas, alpha: true, antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+
+  /* Cada janela aberta multiplica este custo, então o governador é
+     compartilhado: se a máquina não segura, todas baixam juntas. Uma janela
+     decidindo sozinha que está tudo bem enquanto as outras engasgam não
+     descreve máquina nenhuma. */
+  const governador = opcoes.governador || criarGovernador();
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, governador.perfil.dpr));
+
+  const ritmo = governador.criarRitmo();
 
   const cena = new T.Scene();
   const camera = new T.PerspectiveCamera(42, 1, 0.1, 100);
@@ -69,13 +78,21 @@ export function createHoloScene(T, GLTFLoader, canvas, assunto, modo = 'jarvis',
 
   /* ------------------------------------------------------------- controles */
 
-  function redimensionar() {
-    const l = canvas.clientWidth, a = canvas.clientHeight;
-    if (!l || !a) return;
+  let largura = 0;
+  /* Ler `clientWidth` dentro do laço força recálculo de layout a cada quadro,
+     por janela aberta. O observador entrega o número já calculado. */
+  const pararTamanho = observarTamanho(canvas, (l, a) => {
+    largura = l;
     renderer.setSize(l, a, false);
     camera.aspect = l / a;
     camera.updateProjectionMatrix();
-  }
+  });
+
+  /* Janela rolada para fora da vista continuava desenhando a 60 fps. Aqui não
+     se trata de aparar gordura: é deixar de pagar inteiro por algo que
+     ninguém está olhando. */
+  let visivel = true;
+  const pararVisibilidade = observarVisibilidade(canvas, (v) => { visivel = v; });
 
   let arrastando = null;
   const aoPressionar = (e) => { arrastando = { x: e.clientX, y: e.clientY, th: camadas.tth, ph: camadas.tph }; };
@@ -97,10 +114,11 @@ export function createHoloScene(T, GLTFLoader, canvas, assunto, modo = 'jarvis',
 
   /* ------------------------------------------------------------------ laço */
 
-  (function laco() {
+  (function laco(agora) {
     if (!vivo) return;
     raf = requestAnimationFrame(laco);
-    redimensionar();
+    if (!largura || !visivel) return;
+    if (!ritmo(agora || performance.now())) return;
     const delta = relogio.getDelta();
     const t = relogio.elapsedTime;
 
@@ -142,6 +160,8 @@ export function createHoloScene(T, GLTFLoader, canvas, assunto, modo = 'jarvis',
       window.removeEventListener('pointermove', aoMover);
       window.removeEventListener('pointerup', aoSoltar);
       canvas.removeEventListener('wheel', aoRodar);
+      pararTamanho();
+      pararVisibilidade();
       limpar();
       material.dispose();
       // Devolve o contexto WebGL na hora: esperar o coletor de lixo é o que
