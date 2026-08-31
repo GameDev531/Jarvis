@@ -276,30 +276,45 @@ def check_webrtcvad() -> CheckResult:
     )
 
 
-# ---------------------------------------------------------------- porcupine
+# ------------------------------------------------------------- palavra de ativação
 
-def check_porcupine() -> CheckResult:
-    try:
-        import numpy as np
-        import pvporcupine
-    except ImportError as exc:
-        return CheckResult(
-            "porcupine", False, error=f"não instalado: {exc}", missing_dep=True
-        )
+def check_wake_word() -> CheckResult:
+    """Testa o motor **configurado**, seja ele qual for.
+
+    Antes isto testava o Porcupine e mais nada. Quem escolhesse `openwakeword`
+    ou `atalho` — os dois caminhos que não exigem conta — via um `[FALHOU]`
+    crítico por não ter uma chave que decidiu não usar. Relatório que acusa
+    erro onde não há erro é pior que relatório nenhum: ensina a ignorá-lo.
+    """
+    import numpy as np
 
     from james.config import get_secret, load_config
+    from james.runtime.wake_engines import (
+        HotkeyEngine,
+        WakeWordUnavailable,
+        build_wake_engine,
+    )
 
     config = load_config()
-    access_key = get_secret(str(config.get("wake_word.access_key_env", "PORCUPINE_ACCESS_KEY")))
-    if not access_key:
+    try:
+        engine = build_wake_engine(config, get_secret)
+    except WakeWordUnavailable as exc:
         return CheckResult(
-            "porcupine",
-            False,
-            error="PORCUPINE_ACCESS_KEY ausente no .env (crie em console.picovoice.ai)",
+            "wake_word", False, error=str(exc), missing_dep=exc.falta_pacote
         )
 
-    keyword = str(config.get("wake_word.keyword", "jarvis")).lower()
-    engine = pvporcupine.create(access_key=access_key, keywords=[keyword])
+    motor = getattr(engine, "nome", type(engine).__name__)
+
+    if isinstance(engine, HotkeyEngine):
+        # Nada a medir: o microfone não abre e nenhuma inferência roda. Esse é
+        # exatamente o ponto do modo atalho numa máquina modesta.
+        return CheckResult(
+            name="wake_word",
+            ok=True,
+            detail=f"modo atalho ({engine.atalho}) — sem microfone aberto, custo zero de CPU",
+            metrics={"motor": motor, "atalho": engine.atalho, "uso_de_nucleo": 0.0},
+        )
+
     try:
         silence = np.zeros(engine.frame_length, dtype=np.int16)
         started = time.monotonic()
@@ -307,14 +322,25 @@ def check_porcupine() -> CheckResult:
             engine.process(silence)
         elapsed = time.monotonic() - started
         frame_ms = engine.frame_length * 1000 / engine.sample_rate
-        # Fração de um núcleo consumida pela escuta contínua.
+        # Fração de um núcleo consumida pela escuta contínua. É o número que
+        # importa aqui: esse custo é pago o dia inteiro, não só quando se fala.
         cpu_share = (elapsed * 1000 / 100) / frame_ms
+        palavra = str(
+            config.get(
+                f"wake_word.{motor}.modelo",
+                config.get("wake_word.keyword", "jarvis"),
+            )
+        )
         return CheckResult(
-            name="porcupine",
+            name="wake_word",
             ok=True,
-            detail=f"'{keyword}' carregada; ~{cpu_share * 100:.1f}% de um núcleo em escuta contínua",
+            detail=(
+                f"{motor}: '{palavra}' carregada; "
+                f"~{cpu_share * 100:.1f}% de um núcleo em escuta contínua"
+            ),
             metrics={
-                "palavra": keyword,
+                "motor": motor,
+                "palavra": palavra,
                 "taxa_hz": engine.sample_rate,
                 "frame_length": engine.frame_length,
                 "ms_por_frame": round(elapsed * 10, 3),
@@ -608,7 +634,7 @@ CHECKS: dict[str, Callable[[], CheckResult]] = {
     "cpu": check_cpu,
     "onnxruntime": check_onnxruntime,
     "webrtcvad": check_webrtcvad,
-    "porcupine": check_porcupine,
+    "wake_word": check_wake_word,
     "piper": check_piper,
     "whisper": check_whisper,
     "rede": check_network,

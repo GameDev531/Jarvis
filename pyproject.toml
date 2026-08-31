@@ -16,7 +16,6 @@ dependencies = [
     "numpy>=1.24",
     "httpx>=0.27",
     "sounddevice>=0.4.6",
-    "pvporcupine>=3.0",
     "google-genai>=1.0",
     "PySide6>=6.6",
     "webrtcvad-wheels>=2.0.14; sys_platform == 'win32'",
@@ -31,10 +30,15 @@ piper = ["piper-tts>=1.2"]
 office = ["python-pptx>=0.6.23", "openpyxl>=3.1"]
 # Análise de câmera
 camera = ["opencv-python>=4.9"]
+# Palavra de ativação sem conta nem chave — o console da Picovoice recusa
+# e-mail pessoal, então este é o caminho que funciona para todo mundo.
+wakeword = ["openwakeword>=0.6", "onnxruntime>=1.16"]
+# O Porcupine continua suportado para quem já tem chave.
+porcupine = ["pvporcupine>=3.0"]
 # Modo de gestos. Só é usado enquanto o modo está ligado — sem estes pacotes o
 # resto do James funciona igual, e ligar o modo devolve uma frase explicando.
 gestures = ["opencv-python>=4.9", "mediapipe>=0.10.14"]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "openwakeword>=0.6", "onnxruntime>=1.16"]
 
 [project.scripts]
 james = "james.runtime.wake_listener:main"

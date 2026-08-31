@@ -10,6 +10,8 @@ Alguém abriu o relatório, viu quatro falhas críticas e concluiu "bastante
 problema" — quando três delas eram a mesma linha de instalação faltando.
 """
 
+import sys
+
 import james.diagnostics.check_hardware as ch
 from james.diagnostics.check_hardware import CheckResult, _print_report, _verdict
 
@@ -40,7 +42,7 @@ def test_veredito_diz_que_a_maquina_nao_esta_quebrada():
     """A frase que evita a conclusão errada sobre a própria máquina."""
     veredito = _verdict([
         cpu_ok(),
-        CheckResult("porcupine", False, error="não instalado", missing_dep=True),
+        CheckResult("wake_word", False, error="não instalado", missing_dep=True),
     ])
     assert "Nada está quebrado" in veredito["observacoes"][0]
 
@@ -113,8 +115,47 @@ def test_avx_presente_levanta_a_bandeira():
     assert any("TEM AVX" in nota for nota in veredito["observacoes"])
 
 
+# ------------------------------------------------- a palavra de ativação
+
+def test_modo_atalho_passa_sem_chave_nenhuma(monkeypatch):
+    """Quem escolheu `atalho` não tem palavra de ativação — de propósito.
+
+    Antes, este check testava o Porcupine e mais nada, então marcava
+    `[FALHOU]` crítico por faltar uma chave que a pessoa decidiu não usar.
+    Relatório que acusa erro onde não há erro ensina a ignorar o relatório.
+    """
+    import james.config
+    from james.config import Config
+
+    monkeypatch.setattr(
+        james.config, "load_config",
+        lambda *a, **k: Config({"wake_word": {"motor": "atalho", "atalho": "ctrl+alt+j"}}),
+    )
+    resultado = ch.check_wake_word()
+    assert resultado["ok"], resultado["error"]
+    assert resultado["metrics"]["uso_de_nucleo"] == 0.0
+    assert "ctrl+alt+j" in resultado["detail"]
+
+
+def test_motor_indisponivel_por_falta_de_pacote_e_marcado_como_ausente(monkeypatch):
+    """`missing_dep` é o que decide entre "rode o pip" e "algo quebrou"."""
+    import james.config
+    from james.config import Config
+
+    monkeypatch.setattr(
+        james.config, "load_config",
+        lambda *a, **k: Config({"wake_word": {"motor": "openwakeword"}}),
+    )
+    monkeypatch.setitem(sys.modules, "openwakeword", None)
+    monkeypatch.setitem(sys.modules, "openwakeword.model", None)
+
+    resultado = ch.check_wake_word()
+    assert not resultado["ok"]
+    assert resultado["missing_dep"] is True
+
+
 def test_todo_check_registrado_devolve_CheckResult():
     """Um check que devolve outra coisa quebraria o relatório inteiro."""
-    assert set(ch.CHECKS) >= {"cpu", "onnxruntime", "webrtcvad", "porcupine", "piper"}
+    assert set(ch.CHECKS) >= {"cpu", "onnxruntime", "webrtcvad", "wake_word", "piper"}
     for nome, funcao in ch.CHECKS.items():
         assert callable(funcao), nome

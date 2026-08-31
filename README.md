@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 16 implementadas. 844 testes automatizados.
+**Estado atual:** Fases 0 a 18 implementadas. 865 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -64,10 +64,16 @@ copy .env.example .env
 |---|---|---|
 | `GEMINI_API_KEY` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | ouvir e ver |
 | `OPENROUTER_API_KEY` | [openrouter.ai/keys](https://openrouter.ai/keys) | pensar e agir |
-| `PORCUPINE_ACCESS_KEY` | [console.picovoice.ai](https://console.picovoice.ai) | palavra de ativação |
+| `PORCUPINE_ACCESS_KEY` | [console.picovoice.ai](https://console.picovoice.ai) | palavra de ativação — **opcional**, veja abaixo |
 | `ELEVENLABS_API_KEY` | [elevenlabs.io](https://elevenlabs.io) | voz na nuvem (opcional) |
 
 O `.env` está no `.gitignore`. Nunca comite ele.
+
+> **Sobre a chave da Picovoice:** o console deles recusa e-mail pessoal —
+> tentar criar conta com Gmail devolve *"Please enter a valid company email"*.
+> É uma barreira comercial, não técnica, e não decide se o James liga. O
+> padrão é o **openWakeWord**, que não pede conta nenhuma. Veja
+> [Palavra de ativação](#palavra-de-ativação-três-caminhos).
 
 ### 3. Voz do Piper (TTS)
 
@@ -94,13 +100,13 @@ ele se manifesta lá na frente como `ModuleNotFoundError`, que parece outra
 coisa.
 
 ```bash
-# 1. Instalar (é isto que traz PySide6, Porcupine e webrtcvad)
+# 1. Instalar (é isto que traz PySide6, openWakeWord e webrtcvad)
 python -m venv .venv
 .venv\Scripts\activate
 pip install -e ".[dev]"
 
 # 2. Chaves de API
-copy .env.example .env        # e preencha as três chaves
+copy .env.example .env        # GEMINI_API_KEY já basta para começar
 
 # 3. Voz do Piper — download manual, ver a seção de instalação
 #    voices/pt_BR-faber-medium.onnx  +  o .onnx.json ao lado
@@ -126,9 +132,48 @@ O veredito começa com `PRIMEIRO ISTO:` quando o que falta é só instalação.
 O `wake_listener.py` sobe e supervisiona o orquestrador sozinho — os dois
 processos com um comando só.
 
-Diga **"Jarvis"** (palavra pré-treinada do Porcupine) e depois o comando.
-`Ctrl+Alt+J` cancela qualquer coisa em andamento. `python set_pin.py` define um
-PIN para as ações de risco (opcional).
+Diga **"Hey Jarvis"** e depois o comando. `Ctrl+Alt+J` cancela qualquer coisa
+em andamento. `python set_pin.py` define um PIN para as ações de risco
+(opcional).
+
+### Palavra de ativação: três caminhos
+
+O projeto começou preso ao Porcupine, e isso virou um problema real: o console
+da Picovoice **recusa e-mail pessoal**. Quem só tem Gmail não consegue nem
+criar conta. Uma barreira comercial não deveria decidir se o assistente liga,
+então há três motores, e todos entregam o mesmo contrato — o resto do código
+não sabe qual está rodando.
+
+| `wake_word.motor` | Precisa de conta? | CPU em repouso | Como chama |
+|---|---|---|---|
+| `openwakeword` *(padrão)* | não | baixa (ONNX) | fala "Hey Jarvis" |
+| `atalho` | não | **zero** | aperta `Ctrl+Alt+Espaço` |
+| `porcupine` | **sim** | baixa | fala "Jarvis" |
+
+**Numa máquina modesta, considere o `atalho`.** Os outros dois mantêm o
+microfone aberto e rodam inferência a cada 30–80 ms, o dia inteiro. O atalho
+não custa nada enquanto você não aperta a tecla. A troca é honesta: você perde
+o "Jarvis" falado do outro lado da sala e ganha uma máquina que não fica
+processando áudio a tarde toda.
+
+```yaml
+# config.yaml
+wake_word:
+  motor: openwakeword       # ou: atalho, porcupine
+  atalho: ctrl+alt+espaco   # usado quando motor: atalho
+  openwakeword:
+    modelo: hey_jarvis
+    limiar: 0.5             # menor = detecta mais, erra mais
+```
+
+Deixar `motor` vazio faz o James tentar `openwakeword` e depois `porcupine`,
+nessa ordem — o que não exige cadastro vem primeiro.
+
+Na primeira execução o openWakeWord baixa ~14 MB de modelos e os guarda em
+cache; depois disso funciona sem rede. O código dele é Apache 2.0,
+mas os **modelos pré-treinados são CC-BY-NC-SA 4.0** (uso não comercial) —
+para um assistente pessoal está tudo certo; se um dia isto virar produto, será
+preciso treinar modelos próprios, o que o projeto suporta.
 
 ### Só quero ver as interfaces
 
@@ -402,7 +447,7 @@ python check_hardware.py
 ```
 
 Testa, **cada um em subprocesso isolado**, se cada peça funciona nesta máquina:
-flags reais do processador, ONNX Runtime, webrtcvad, Porcupine, Piper (com
+flags reais do processador, ONNX Runtime, webrtcvad, wake word, Piper (com
 razão de tempo real), whisper.cpp, latência de rede, desenho do HUD e o custo do
 rastreamento de mão. Gera `hardware_report.json`.
 
@@ -429,7 +474,8 @@ AVX, vale reavaliar essas trocas.
 
 ```
 PROCESSO 1 — wake_listener.py  (sempre vivo, magro: sem Qt, sem modelo)
-  microfone → Porcupine → detectou
+  microfone → motor de wake word → detectou
+  (ou, no modo atalho: nem abre o microfone — a tecla é o gatilho)
   + watchdog do processo 2 + lock de instância única
         │  fecha o microfone e avisa
         ▼
@@ -796,7 +842,7 @@ por voz sai **uma vez**, não a cada turno.
 ## Testes
 
 ```bash
-python -m pytest tests/ -q          # 844 testes
+python -m pytest tests/ -q          # 865 testes
 ```
 
 | Arquivo | O que cobre |
@@ -834,7 +880,8 @@ python -m pytest tests/ -q          # 844 testes
 | `test_repo_integrity.py` | Nenhum código-fonte ignorado pelo git; pacotes rastreados |
 | `test_check_hardware.py` | Ausente vs quebrado, alinhamento, veredito |
 | `test_catalogo_completo.py` | O catálogo monta; todo handler degrada com lixo |
-| `test_wake_listener.py` | Reagrupamento de frames, tamanho exigido pelo Porcupine |
+| `test_wake_listener.py` | Reagrupamento de frames, tamanho exigido pelo motor |
+| `test_wake_engines.py` | Contrato dos três motores, ordem da fábrica, debounce |
 | `test_voz_cadeia.py` | Orçamento de caracteres, queda para o local, API real |
 | `test_hotkey.py` | Interpretação do atalho |
 
@@ -895,7 +942,9 @@ james/
 - [x] **Fase 14** — modos sob comando e gestos por webcam
 - [x] **Fase 15** — interface holográfica (Three.js) como modo
 - [x] **Fase 16** — projeção holográfica: shader, catálogo curado e cascata
-- [ ] **Fase 17** — wake word "James" própria (openWakeWord)
+- [x] **Fase 17** — voz na nuvem: cadeia ElevenLabs → Piper com orçamento de caracteres
+- [x] **Fase 18** — wake word sem cadastro: openWakeWord, Porcupine e atalho
+      atrás do mesmo contrato (uma palavra "James" própria ainda pode ser treinada)
 - [ ] Backlog de ferramentas maiores: ver [PLANO.md](PLANO.md)
 
 O login por reconhecimento facial foi **retirado do escopo**: o MediaPipe

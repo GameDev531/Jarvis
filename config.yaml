@@ -8,9 +8,33 @@ persona:
   idioma: pt-BR
 
 wake_word:
-  # "jarvis" é keyword pré-treinada do Porcupine (grátis, sem treino).
-  # Para "james" de verdade: gere um .ppn no console da Picovoice e aponte
-  # keyword_path para ele, ou treine um modelo openWakeWord (Fase 7).
+  # COMO CHAMAR O JAMES — três caminhos:
+  #
+  #   openwakeword  sem conta, sem chave. Modelo "hey jarvis" pronto, roda em
+  #                 ONNX (o mesmo que a Fase 0 já testa). É o padrão.
+  #   atalho        SEM palavra de ativação: aperta a tecla e fala. Custo de
+  #                 CPU ZERO — o microfone nem abre. Melhor opção em máquina
+  #                 fraca; a troca é perder o "Jarvis" falado à distância.
+  #   porcupine     o original. Preciso, leve — mas o console da Picovoice
+  #                 RECUSA e-mail pessoal ("Please enter a valid company
+  #                 email"), o que na prática o torna inacessível para muita
+  #                 gente.
+  #
+  # Vazio = tenta openwakeword e depois porcupine, nessa ordem.
+  motor: openwakeword
+
+  openwakeword:
+    # Modelos prontos: hey_jarvis, alexa, hey_mycroft, hey_rhasspy, timer...
+    # Baixados uma vez na primeira execução (poucos MB, ficam em cache).
+    # Código Apache 2.0; os MODELOS são CC-BY-NC-SA 4.0 — uso não comercial.
+    modelo: hey_jarvis
+    limiar: 0.5              # 0.5 é o valor para o qual foram treinados
+    vad: 0.0                 # >0 descarta silêncio antes da inferência
+
+  # Usado quando motor: atalho
+  atalho: ctrl+alt+espaco
+
+  # Usado quando motor: porcupine
   keyword: jarvis
   keyword_path: null
   sensitivity: 0.6

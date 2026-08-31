@@ -28,15 +28,16 @@ from typing import Iterator
 from james.audio.capture import AudioDeviceError, MicrophoneStream
 from james.config import AudioFormat, Config, ConfigError, get_secret, load_config
 from james.logs import audit, get_logger, setup_logging
+from james.runtime.wake_engines import (
+    HotkeyEngine,
+    WakeWordUnavailable,
+    build_wake_engine,
+)
 from james.state.ipc import IpcServer, PortUnavailable
 
 logger = get_logger("james.wake")
 
 _ORCHESTRATOR_MODULE = "james.runtime.orchestrator"
-
-
-class WakeWordUnavailable(RuntimeError):
-    """Porcupine não pôde ser inicializado."""
 
 
 class _FrameRechunker:
@@ -67,7 +68,7 @@ class _FrameRechunker:
 class WakeListener:
     def __init__(self, config: Config) -> None:
         self.config = config
-        self.porcupine = self._create_porcupine()
+        self.porcupine = build_wake_engine(config, get_secret)
         # O Porcupine dita o formato: 16 kHz mono e frames de 512 amostras.
         self.audio_format = AudioFormat(
             sample_rate=self.porcupine.sample_rate,
@@ -101,51 +102,9 @@ class WakeListener:
         self._listening.set()
         self._running = threading.Event()
         self._child: subprocess.Popen | None = None
+        self._hotkey = None
         self._last_heartbeat = time.monotonic()
         self._restarts = 0
-
-    # ------------------------------------------------------------- porcupine
-
-    def _create_porcupine(self):
-        try:
-            import pvporcupine
-        except ImportError as exc:
-            raise WakeWordUnavailable(
-                "Pacote 'pvporcupine' não instalado (pip install pvporcupine)."
-            ) from exc
-
-        access_key = get_secret(str(self.config.get("wake_word.access_key_env", "PORCUPINE_ACCESS_KEY")))
-        if not access_key:
-            raise WakeWordUnavailable(
-                "Chave do Porcupine ausente. Crie uma em console.picovoice.ai e "
-                "coloque em PORCUPINE_ACCESS_KEY no .env."
-            )
-
-        sensitivity = float(self.config.get("wake_word.sensitivity", 0.6))
-        keyword_path = self.config.resolve_path("wake_word.keyword_path")
-
-        try:
-            if keyword_path is not None:
-                if not keyword_path.exists():
-                    raise WakeWordUnavailable(
-                        f"Modelo de palavra de ativação não encontrado: {keyword_path}"
-                    )
-                logger.info("Palavra de ativação personalizada: %s", keyword_path.name)
-                return pvporcupine.create(
-                    access_key=access_key,
-                    keyword_paths=[str(keyword_path)],
-                    sensitivities=[sensitivity],
-                )
-
-            keyword = str(self.config.get("wake_word.keyword", "jarvis")).lower()
-            logger.info("Palavra de ativação: '%s'", keyword)
-            return pvporcupine.create(
-                access_key=access_key, keywords=[keyword], sensitivities=[sensitivity]
-            )
-        except WakeWordUnavailable:
-            raise
-        except Exception as exc:  # noqa: BLE001 — o SDK levanta tipos variados
-            raise WakeWordUnavailable(f"Falha ao inicializar o Porcupine: {exc}") from exc
 
     # ---------------------------------------------------------------- IPC
 
@@ -237,7 +196,54 @@ class WakeListener:
 
     # ------------------------------------------------------------ escuta
 
+    def _start_hotkey(self):
+        """No modo atalho, a tecla faz o papel da palavra de ativação.
+
+        Reaproveita o mesmo `GlobalHotkey` do kill switch — mecanismo já
+        provado, e uma dependência a menos do que registrar outro.
+        """
+        if not self.usa_atalho:
+            return None
+        from james.hotkey.killswitch import GlobalHotkey, HotkeyError
+
+        try:
+            atalho = GlobalHotkey(self.porcupine.atalho, self._pedir_escuta)
+        except HotkeyError as exc:
+            logger.error(
+                "Não consegui registrar %s: %s. Sem palavra de ativação e sem "
+                "atalho, o James não tem como ser chamado.",
+                self.porcupine.atalho, exc,
+            )
+            return None
+        if not atalho.start():
+            return None
+        logger.info("Aperte %s para falar com o James.", self.porcupine.atalho)
+        return atalho
+
+    def _pedir_escuta(self) -> None:
+        """Chamado pela thread do atalho, de fora do laço principal."""
+        if not self._listening.is_set():
+            logger.debug("Atalho ignorado: o James já está ouvindo ou falando.")
+            return
+        audit("atalho_de_voz")
+        self._listening.clear()
+        if not self.server.send({"type": "wake"}):
+            logger.warning("Orquestrador não está conectado; ignorando o atalho.")
+            self._listening.set()
+
+    @property
+    def usa_atalho(self) -> bool:
+        return isinstance(self.porcupine, HotkeyEngine)
+
     def _listen_loop(self) -> None:
+        if self.usa_atalho:
+            # O ponto do modo atalho: o microfone NUNCA abre sozinho. Sem laço,
+            # sem inferência, sem CPU — a thread só espera o encerramento.
+            logger.info("Modo atalho: aperte %s para falar.", self.porcupine.atalho)
+            while self._running.is_set():
+                self._running.wait(timeout=1.0)
+            return
+
         import numpy as np
 
         # `self.frame_bytes`, não `audio_format.frame_bytes`: ver o comentário
@@ -298,6 +304,8 @@ class WakeListener:
         watchdog = threading.Thread(target=self._watchdog_loop, name="watchdog", daemon=True)
         watchdog.start()
 
+        self._hotkey = self._start_hotkey()
+
         try:
             self._listen_loop()
         except KeyboardInterrupt:
@@ -311,6 +319,8 @@ class WakeListener:
         self._listening.set()
         self.server.send({"type": "shutdown"})
         self._terminate_child()
+        if self._hotkey is not None:
+            self._hotkey.stop()
         self.server.stop()
         try:
             self.porcupine.delete()

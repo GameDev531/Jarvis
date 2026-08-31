@@ -28,11 +28,15 @@ descreve por que as coisas são como são e o que falta.
 | 15 — Interface holográfica | ✅ | Desenho do usuário portado, servido como modo, ligado ao estado real |
 | 16 — Projeção holográfica | ✅ | Shader, catálogo curado de 14 assuntos, cascata com tetos |
 | 17 — Voz na nuvem | ✅ | Cadeia ElevenLabs → Piper, orçamento de caracteres |
-| 18 — Wake word própria | ⬜ | Treino de "James" via openWakeWord |
-| 19 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
+| 18 — Wake word sem cadastro | ✅ | openWakeWord, Porcupine e atalho atrás do mesmo contrato |
+| 19 — Wake word "James" própria | ⬜ | Treino do modelo pelo openWakeWord |
+| 20 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
 
-**844 testes automatizados.** Nada de Porcupine, Piper, whisper.cpp, Qt ou
-câmera foi executado em hardware real ainda — a Fase 0 existe para isso.
+**865 testes automatizados.** Piper, whisper.cpp, Qt e câmera continuam sem
+execução em hardware real — a Fase 0 existe para isso. O openWakeWord é a
+exceção: o motor foi carregado de verdade neste ambiente (modelo `hey_jarvis`,
+~14 MB baixados, 2,4% de um núcleo em escuta contínua num processador
+moderno). Falta rodá-lo no Sandy Bridge de destino.
 
 ---
 
@@ -760,6 +764,41 @@ rejeitaria todos os frames, e nada no caminho perceberia, porque a conta
 `porcupine.frame_length`, sem passar por milissegundos.
 
 Não estava quebrado. Estava a uma mudança de modelo de quebrar em silêncio.
+
+### Fase 18 — a palavra de ativação deixa de depender de cadastro
+
+O aviso acima ("a 22050 Hz daria 507") virou realidade mais rápido do que o
+esperado, e por um motivo que não era técnico: **o console da Picovoice recusa
+e-mail pessoal.** Tentar criar conta com Gmail devolve *"Please enter a valid
+company email"*. Uma barreira comercial estava decidindo se o assistente liga.
+
+Três motores agora entregam o mesmo contrato — `sample_rate`, `frame_length`,
+`process() -> int`, `delete()` — em `runtime/wake_engines.py`. O
+`WakeListener` não sabe qual está rodando:
+
+| Motor | Conta? | CPU em repouso |
+|---|---|---|
+| `openwakeword` *(padrão)* | não | baixa — ONNX, modelo "hey jarvis" pronto |
+| `atalho` | não | **zero** — o microfone nem abre |
+| `porcupine` | sim | baixa |
+
+O `atalho` é o caso interessante: não é um motor de áudio, é a *ausência* de
+um. Num Sandy Bridge de 2011, deixar de rodar inferência a cada 80 ms o dia
+inteiro vale mais que chamar o James do outro lado da sala. Ele reaproveita o
+mesmo `GlobalHotkey` do kill switch — mecanismo já provado, uma dependência a
+menos.
+
+Duas consequências que valem registro:
+
+- O `pvporcupine` saiu das dependências obrigatórias para o extra
+  `[porcupine]`. Ninguém mais instala um SDK que talvez não possa usar.
+- A Fase 0 testava o Porcupine e mais nada. Quem escolhesse um dos dois
+  caminhos sem conta via `[FALHOU]` crítico por não ter uma chave que decidiu
+  não usar. O check agora monta o motor **configurado** — relatório que acusa
+  erro onde não há erro ensina a ignorar o relatório.
+
+Os modelos pré-treinados do openWakeWord são CC-BY-NC-SA 4.0 (não comercial).
+Para uso pessoal está certo; virando produto, é preciso treinar os próprios.
 
 ### O que a auditoria não cobre
 
