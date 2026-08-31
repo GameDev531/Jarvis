@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 18 implementadas. 886 testes automatizados.
+**Estado atual:** Fases 0 a 18 implementadas. 892 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -174,6 +174,36 @@ cache; depois disso funciona sem rede. O código dele é Apache 2.0,
 mas os **modelos pré-treinados são CC-BY-NC-SA 4.0** (uso não comercial) —
 para um assistente pessoal está tudo certo; se um dia isto virar produto, será
 preciso treinar modelos próprios, o que o projeto suporta.
+
+### São duas interfaces, e a holográfica não sobe sozinha
+
+Isto confunde na primeira vez, então vale dizer direto: `python wake_listener.py`
+abre a **janela Qt** — a interface nativa, sóbria, que fica sempre de pé. A
+**interface holográfica** (Three.js, no navegador) é um *modo*, e modos nascem
+desligados.
+
+| | Janela Qt | Interface holográfica |
+|---|---|---|
+| Sobe sozinha | sim | **não** |
+| Onde | janela nativa | aba do navegador |
+| Custo | baixo | GPU do navegador |
+
+Para o James subir já com a holográfica, sem pedir toda vez:
+
+```yaml
+# config.yaml
+modos:
+  iniciar_com: [holograma]
+```
+
+Isso vale para qualquer forma de iniciar — inclusive `wake_listener.py`, que
+sobe o orquestrador sem argumento nenhum e por isso não tinha como receber a
+flag `--holograma`. Também dá para ligar na hora, por voz ("Jarvis, liga o modo
+holograma") ou por linha de comando (`python main.py --holograma`).
+
+A regra "modo nasce desligado" existe para recurso caro — câmera, CPU contínua.
+A holográfica não é nada disso, então deixá-la no `iniciar_com` é escolha sua,
+sem contrapartida.
 
 ### Só quero ver as interfaces
 
@@ -862,7 +892,7 @@ por voz sai **uma vez**, não a cada turno.
 ## Testes
 
 ```bash
-python -m pytest tests/ -q          # 886 testes
+python -m pytest tests/ -q          # 892 testes
 ```
 
 | Arquivo | O que cobre |

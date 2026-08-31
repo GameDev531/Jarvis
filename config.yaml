@@ -272,6 +272,18 @@ camera:
 # Dois modos não podem disputar o mesmo recurso: se um já segura a câmera, o
 # outro é recusado em vez de os dois brigarem pelo dispositivo.
 modos:
+  # Modos que sobem junto com o James, sem precisar pedir.
+  #
+  # A regra "modo nasce desligado" existe para recurso caro: câmera, CPU
+  # contínua. A interface holográfica não é nada disso — ela é uma aba do
+  # navegador — e para quem quer o James com a cara dela, ter que ligar toda
+  # vez é atrito puro. Quem inicia por `wake_listener.py` nem tinha como: ele
+  # sobe o orquestrador sem argumento, então a janela Qt era a única saída.
+  #
+  # Deixe vazio para o comportamento antigo (só a janela Qt).
+  #   iniciar_com: [holograma]   -> abre a interface holográfica no navegador
+  iniciar_com: []
+
   gestos:
     enabled: true
     # `false` aqui não desliga só o rastreamento: o modo nem é registrado, e

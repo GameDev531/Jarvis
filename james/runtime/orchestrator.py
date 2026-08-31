@@ -888,6 +888,28 @@ class Orchestrator:
         return greeting_instruction()
 
 
+def modos_para_ligar(config, da_linha: list[str], holograma: bool) -> list[str]:
+    """Quais modos sobem junto com o James, na ordem em que serão ligados.
+
+    `modos.iniciar_com` vem primeiro porque é a preferência permanente de quem
+    usa; as flags são o pedido desta execução. A escolha mora no config, e não
+    só no comando, de propósito: o `wake_listener.py` sobe o orquestrador **sem
+    argumento nenhum**, então uma flag só serviria para quem chama o `main.py`
+    na mão — justamente quem menos precisa disso. Quem inicia pelo caminho
+    normal recebia sempre a janela Qt, sem jeito de mudar.
+
+    A ordem importa quando dois modos disputam o mesmo recurso: o primeiro
+    ganha, e o segundo é recusado com uma frase em vez de os dois brigarem.
+    """
+    pedidos = [str(nome) for nome in (config.get("modos.iniciar_com") or [])]
+    pedidos += [str(nome) for nome in (da_linha or [])]
+    if holograma:
+        pedidos.append("holograma")
+    # Ligar duas vezes o mesmo modo devolveria "já está ligado" na segunda —
+    # ruído sem informação.
+    return list(dict.fromkeys(pedidos))
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
@@ -944,8 +966,7 @@ def main(argv: list[str] | None = None) -> int:
     # Isto NÃO fura o guard: a confirmação de Nível 2 existe para saber quem
     # está pedindo, e quem tem acesso ao terminal já é a pessoa da máquina.
     # Ligar por voz é que precisa provar identidade.
-    pedidos = list(args.modo) + (["holograma"] if args.holograma else [])
-    for nome in dict.fromkeys(pedidos):        # sem repetir, mantendo a ordem
+    for nome in modos_para_ligar(config, args.modo, args.holograma):
         try:
             print(orchestrator.modes.ligar(nome))
         except ModeError as exc:

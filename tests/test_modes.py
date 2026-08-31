@@ -192,3 +192,48 @@ def test_listar_traz_estado_e_recursos():
     assert info.estado == "ligado"
     assert info.recursos == ["camera"]
     assert info.to_dict()["nome"] == "a"
+
+
+# --------------------------------------------- modos que sobem com o James
+
+# Alguém rodou `python wake_listener.py`, viu a janela Qt e perguntou por que
+# não era a interface holográfica que tínhamos feito. A causa: o wake listener
+# sobe o orquestrador SEM ARGUMENTO NENHUM, e o modo holograma nasce desligado.
+# Pelo caminho normal de iniciar o James não havia como pedir outra coisa —
+# `--holograma` só existia para quem chamasse o main.py na mão.
+
+from james.config import Config
+from james.runtime.orchestrator import modos_para_ligar
+
+
+def test_sem_nada_configurado_nenhum_modo_sobe():
+    """O padrão continua sendo o essencial: só a janela Qt."""
+    assert modos_para_ligar(Config({}), [], False) == []
+
+
+def test_config_liga_o_modo_sem_precisar_de_flag():
+    """O ponto da correção: funciona para quem inicia por wake_listener.py."""
+    config = Config({"modos": {"iniciar_com": ["holograma"]}})
+    assert modos_para_ligar(config, [], False) == ["holograma"]
+
+
+def test_flag_continua_funcionando():
+    assert modos_para_ligar(Config({}), [], True) == ["holograma"]
+    assert modos_para_ligar(Config({}), ["gestos"], False) == ["gestos"]
+
+
+def test_config_e_flag_nao_ligam_duas_vezes():
+    """Ligar de novo devolveria "já está ligado" — ruído sem informação."""
+    config = Config({"modos": {"iniciar_com": ["holograma"]}})
+    assert modos_para_ligar(config, ["holograma"], True) == ["holograma"]
+
+
+def test_config_vem_antes_da_linha_de_comando():
+    """A ordem decide quem fica com o recurso quando dois modos o disputam."""
+    config = Config({"modos": {"iniciar_com": ["holograma"]}})
+    assert modos_para_ligar(config, ["gestos"], False) == ["holograma", "gestos"]
+
+
+def test_lista_nula_no_config_nao_explode():
+    """`iniciar_com:` sem valor vira None no YAML, não lista vazia."""
+    assert modos_para_ligar(Config({"modos": {"iniciar_com": None}}), [], False) == []
