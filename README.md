@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 19 implementadas. 998 testes automatizados.
+**Estado atual:** Fases 0 a 19 implementadas. 1001 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -1026,6 +1026,34 @@ entre todos eles** — 50/dia sem crédito, 1.000/dia com US$ 10 vitalícios,
 multiplica a cota diária. Aqueles US$ 10 únicos são o melhor custo-benefício do
 stack inteiro.
 
+### A lista de modelos é curada, não é "tudo que é grátis"
+
+Uma cadeia de reserva vale o que vale **o seu pior membro alcançável**. Todo
+modelo na lista é um James possível: um modelo pequeno demais responde, mas
+responde como atendente — e no dia em que a cadeia descer até ele, a persona
+ajustada vai junto.
+
+Por isso ficam de fora, de propósito, modelos grátis que são bons no que fazem
+mas não no que fazemos aqui: `nemotron-nano-9b-v2` e `gpt-oss-20b` (pequenos
+demais para segurar personagem), `lfm2.5` (feito para celular), `laguna-s-2.1`
+(agente de código, não de conversa).
+
+A última linha é a mais interessante:
+
+```yaml
+- openrouter/free    # sempre por último
+```
+
+O roteador de modelos grátis escolhe um **ao acaso** entre os disponíveis,
+filtrando por quem suporta ferramentas. Aleatório é péssimo para persona — seria
+o James trocando de personalidade a cada turno —, então ele nunca pode estar em
+cima. Mas como rede de segurança é perfeito: **é a única entrada que não pode
+virar 404**. Enquanto existir um modelo grátis no OpenRouter, ela responde,
+mesmo que todas as de cima sejam aposentadas de uma vez — o que já aconteceu.
+
+> Não confunda com `openrouter/auto`: esse roteia para modelos **pagos**. Uma
+> palavra de diferença, e a conta chega no fim do mês. Um teste barra o nome.
+
 ### O catálogo `:free` muda — confira de vez em quando
 
 ```bash
@@ -1067,7 +1095,7 @@ por voz sai **uma vez**, não a cada turno.
 ## Testes
 
 ```bash
-python -m pytest tests/ -q          # 998 testes
+python -m pytest tests/ -q          # 1001 testes
 ```
 
 | Arquivo | O que cobre |

@@ -132,6 +132,15 @@ def test_um_teste_pode_definir_a_propria_chave(monkeypatch):
 # o `check_modelos.py`. O que dá para garantir aqui é a forma da lista, que é
 # onde mora o erro caro.
 
+# Grátis, mas sem o sufixo `:free` — são roteadores, não modelos. A exceção é
+# NOMEADA em vez de a regra ser afrouxada: "termina em :free" continua valendo
+# para todo o resto, e é ela que impede um ID pago de entrar em silêncio.
+#
+# Cuidado com o vizinho: `openrouter/auto` PODE rotear para modelo pago, e a
+# diferença entre ele e este aqui é uma palavra.
+GRATIS_SEM_SUFIXO = frozenset({"openrouter/free"})
+
+
 def _openrouter_do_config():
     from james.config import load_config
     return load_config().section("llm.openrouter")
@@ -147,7 +156,7 @@ def test_todo_modelo_do_openrouter_e_gratuito():
     """
     secao = _openrouter_do_config()
     todos = list(secao.get("models") or []) + list(secao.get("vision_models") or [])
-    pagos = [m for m in todos if not str(m).endswith(":free")]
+    pagos = [m for m in todos if not str(m).endswith(":free") and m not in GRATIS_SEM_SUFIXO]
     assert not pagos, f"modelos pagos no config: {pagos}"
 
 
@@ -178,3 +187,38 @@ def test_modelos_removidos_do_catalogo_nao_voltam():
         "meta-llama/llama-3.2-11b-vision-instruct:free",
     }
     assert not (todos & mortos), f"IDs removidos do catálogo: {todos & mortos}"
+
+
+def test_o_roteador_gratis_fica_por_ultimo():
+    """Ele escolhe um modelo ao ACASO. Como primeiro, seria o James trocando de
+    personalidade a cada turno — o mesmo defeito que a troca de voz tinha.
+
+    Como último presta: enquanto existir um modelo grátis no OpenRouter, esta
+    linha responde. É a única que não pode virar 404.
+    """
+    modelos = [str(m) for m in _openrouter_do_config().get("models") or []]
+    assert modelos[-1] == "openrouter/free"
+    assert "openrouter/free" not in modelos[:-1]
+
+
+def test_openrouter_auto_nunca_entra():
+    """`openrouter/auto` roteia para modelos PAGOS. Uma palavra de diferença
+    para o `openrouter/free`, e a conta chega no fim do mês."""
+    secao = _openrouter_do_config()
+    todos = list(secao.get("models") or []) + list(secao.get("vision_models") or [])
+    assert "openrouter/auto" not in [str(m) for m in todos]
+
+
+def test_nenhum_modelo_pequeno_no_raciocinio():
+    """Uma cadeia de reserva vale o que vale o seu pior membro alcançável.
+
+    Modelo de 9B responde — como atendente. No dia em que a cadeia descer até
+    ele, a persona que a gente ajustou vai junto. Estes ficam de fora por
+    escolha, não por esquecimento.
+    """
+    pequenos = {
+        "nvidia/nemotron-nano-9b-v2:free",
+        "openai/gpt-oss-20b:free",
+    }
+    modelos = {str(m) for m in _openrouter_do_config().get("models") or []}
+    assert not (modelos & pequenos), f"modelo pequeno no raciocínio: {modelos & pequenos}"

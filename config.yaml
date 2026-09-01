@@ -124,16 +124,49 @@ llm:
     # TODO o papel de raciocínio chama ferramentas, então todo modelo aqui
     # precisa aceitar `tools`/`tool_choice`. Um modelo sem isso não "responde
     # pior": ele ignora as ferramentas em silêncio e o James vira um chat.
+    #
+    # UMA CADEIA DE RESERVA VALE O QUE VALE O SEU PIOR MEMBRO ALCANÇÁVEL.
+    # Todo modelo aqui é um James possível. Um modelo pequeno demais responde,
+    # mas responde como atendente — e no dia em que a cadeia descer até ele,
+    # a persona inteira que a gente ajustou vai por água abaixo. Por isso a
+    # lista é curada, não é "tudo que é grátis".
     models:
       # O GLM na frente por PERSONA, não por velocidade: o Ling é mais rápido,
       # mas modelo pequeno segura pior um personagem e escorrega de volta para
       # o tom de atendimento. Numa conversa, soar certo vale mais que 200 ms.
       - z-ai/glm-5.2:free                      # generalista forte, 256k
+      - openai/gpt-oss-120b:free               # pesos abertos da OpenAI, tools nativo
       - inclusionai/ling-3.0-flash-fin:free    # 124B MoE, 5,1B ativos — o mais rápido
       - minimax/minimax-m2.7:free              # agêntico, bom com ferramentas
+      - nvidia/nemotron-3-super-120b-a12b:free # 120B/12B ativos, tools + JSON schema
       - dots-studio/dots-3-note-preview:free   # 280B/16B ativos, 512k, também enxerga
       - nvidia/nemotron-3-ultra-550b-a55b:free # o maior — lento, guardado para o difícil
       - cohere/north-mini-code:free            # especialista em código e terminal
+      #
+      # ÚLTIMO, e o único que nunca vira 404: o roteador de modelos grátis
+      # escolhe um ao ACASO entre os disponíveis, filtrando por quem suporta
+      # ferramentas. Aleatório é ruim para persona — seria o James trocando de
+      # personalidade a cada turno —, então ele não pode estar em cima. Mas
+      # como rede de segurança é perfeito: enquanto existir UM modelo grátis
+      # no OpenRouter, esta linha responde, mesmo que todas as de cima sejam
+      # aposentadas de uma vez (o que já aconteceu, com a Meta e a Qwen).
+      - openrouter/free
+
+    # DEIXADOS DE FORA DE PROPÓSITO, e não por esquecimento:
+    #
+    #   nvidia/nemotron-nano-9b-v2:free    9B  — pequeno demais para a persona
+    #   openai/gpt-oss-20b:free            21B/3,6B ativos — idem
+    #   liquidai/lfm2.5-*                  2,6B — feito para rodar em celular
+    #   poolside/laguna-s-2.1, xs-2.1      agentes de CÓDIGO, não de conversa
+    #
+    # Nenhum é ruim; são bons no que fazem. Só não é isto que a gente faz aqui.
+    # Se um dia o James ganhar um papel de "resposta curta e barata" (roteador
+    # local, classificação), esses passam a ser exatamente a escolha certa.
+    #
+    # NÃO conferidos como grátis quando esta lista foi montada — as fontes
+    # públicas mostravam versão paga: MiniMax M3, Nemotron 3.5 Lightning,
+    # Thinking Machines Inkling. Rode `python check_modelos.py` antes de
+    # acrescentar qualquer um: ele consulta o catálogo vivo.
 
     # Modelos do catálogo :free que enxergam imagem. Mandar imagem para um
     # modelo de texto devolve erro ou, pior, uma alucinação sobre algo que ele

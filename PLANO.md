@@ -35,7 +35,7 @@ descreve por que as coisas são como são e o que falta.
 | 22 — Partida cinematográfica do Ultron | ⬜ | Sequência de despertar na interface |
 | 23 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
 
-**998 testes automatizados.** Piper, whisper.cpp, Qt e câmera continuam sem
+**1001 testes automatizados.** Piper, whisper.cpp, Qt e câmera continuam sem
 execução em hardware real — a Fase 0 existe para isso. O openWakeWord é a
 exceção: o motor foi carregado de verdade neste ambiente (modelo `hey_jarvis`,
 ~14 MB baixados, 2,4% de um núcleo em escuta contínua num processador
