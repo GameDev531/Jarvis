@@ -15,6 +15,10 @@ credentials.json
 # Regra: tudo que é pasta de runtime na RAIZ leva `/` na frente.
 # Ver tests/test_repo_integrity.py, que falha se isso voltar a acontecer.
 /hardware_report.json
+# Relatório de cobertura: dado de execução, e estava RASTREADO — apareceu num
+# ZIP de distribuição junto com os logs. A barra é obrigatória (ver o topo).
+/.coverage
+/htmlcov/
 /logs/*.log
 /logs/*.jsonl
 /state/

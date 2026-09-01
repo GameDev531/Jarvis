@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 19 implementadas. 973 testes automatizados.
+**Estado atual:** Fases 0 a 19 implementadas. 998 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -175,6 +175,21 @@ cache; depois disso funciona sem rede. O código dele é Apache 2.0,
 mas os **modelos pré-treinados são CC-BY-NC-SA 4.0** (uso não comercial) —
 para um assistente pessoal está tudo certo; se um dia isto virar produto, será
 preciso treinar modelos próprios, o que o projeto suporta.
+
+### Antes de compartilhar o projeto
+
+```bash
+python distribuir.py          # gera james-dist.zip
+python distribuir.py --listar # só mostra o que entraria
+```
+
+Compactar a pasta à mão **não lê o `.gitignore`**, e foi assim que um ZIP saiu
+daqui com os logs (que guardam seus comandos falados), o token da interface, o
+relatório da máquina e o banco de memória.
+
+O critério é o inverso do intuitivo: em vez de listar o que excluir — e
+esquecer um —, o script pergunta ao git o que é **rastreado**. O que o git não
+versiona não é código do projeto; é dado de execução, e dado de execução é seu.
 
 ### Modo navegador: o Ultron com as mãos no Chrome
 
@@ -1052,7 +1067,7 @@ por voz sai **uma vez**, não a cada turno.
 ## Testes
 
 ```bash
-python -m pytest tests/ -q          # 973 testes
+python -m pytest tests/ -q          # 998 testes
 ```
 
 | Arquivo | O que cobre |
@@ -1098,6 +1113,7 @@ python -m pytest tests/ -q          # 973 testes
 | `test_saudacao.py` | Frase por período, apresentação única, marca em disco |
 | `test_system_prompt.py` | Exemplos de fala, proibição de cardápio, proporção de regras |
 | `test_navegador.py` | Travas de campo sensível, níveis do guard, inspetor em página real |
+| `test_auditoria.py` | Redirecionamento interno, segredos na suíte, cota por provedor |
 | `test_hotkey.py` | Interpretação do atalho |
 
 ---
@@ -1106,7 +1122,8 @@ python -m pytest tests/ -q          # 973 testes
 
 ```
 check_hardware.py     Fase 0
-check_modelos.py      confere os modelos do OpenRouter contra o catálogo vivo
+check_modelos.py      confere os modelos (OpenRouter e Gemini) contra o catálogo vivo
+distribuir.py         empacota para compartilhar, sem logs nem memória
 clonar_voz.py         cria a voz na LMNT a partir de uma amostra
 wake_listener.py      processo 1 (o que você inicia)
 main.py               processo 2 (iniciado pelo processo 1)

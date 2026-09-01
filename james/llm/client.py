@@ -125,7 +125,11 @@ class LLMClient:
 
             return GeminiProvider(
                 api_key=api_key,
-                model=str(self.config.get("llm.gemini.model", "gemini-2.5-flash")),
+                # Lista, com o singular ainda aceito para quem tem config antigo.
+                model=(
+                    self.config.get("llm.gemini.models")
+                    or [str(self.config.get("llm.gemini.model", "gemini-3.5-flash"))]
+                ),
                 system_prompt=self.system_prompt,
                 thinking_budget=int(self.config.get("llm.gemini.thinking_budget", 0)),
                 temperature=float(self.config.get("llm.gemini.temperature", 0.7)),

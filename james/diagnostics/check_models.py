@@ -25,7 +25,7 @@ import argparse
 import json
 import sys
 
-from james.config import PROJECT_ROOT, ConfigError, load_config
+from james.config import PROJECT_ROOT, ConfigError, get_secret, load_config, load_env
 
 _CATALOGO = "https://openrouter.ai/api/v1/models"
 _TIMEOUT_S = 30
@@ -70,20 +70,82 @@ def buscar_catalogo(url: str = _CATALOGO, timeout_s: int = _TIMEOUT_S) -> set[st
     return ids
 
 
+_CATALOGO_GEMINI = "https://generativelanguage.googleapis.com/v1beta/models"
+
+
+def buscar_catalogo_gemini(api_key: str, timeout_s: int = _TIMEOUT_S) -> set[str]:
+    """Modelos que a SUA chave do Gemini enxerga agora.
+
+    Diferente do OpenRouter, aqui a listagem exige chave — o catálogo do Google
+    varia por conta e por região. Sem chave não dá para conferir, e dizer
+    "morto" nesse caso seria mentira.
+    """
+    try:
+        import httpx
+    except ImportError as exc:  # pragma: no cover
+        raise CatalogoIndisponivel("Pacote 'httpx' não instalado.") from exc
+
+    try:
+        resposta = httpx.get(
+            _CATALOGO_GEMINI, params={"key": api_key}, timeout=timeout_s
+        )
+        resposta.raise_for_status()
+        dados = resposta.json()
+    except Exception as exc:  # noqa: BLE001
+        raise CatalogoIndisponivel(f"Não consegui consultar o Gemini: {exc}") from exc
+
+    modelos = dados.get("models") if isinstance(dados, dict) else None
+    if not isinstance(modelos, list):
+        raise CatalogoIndisponivel("Resposta do Gemini em formato inesperado.")
+
+    # A API devolve "models/gemini-3.5-flash"; o config usa o nome curto. Guardar
+    # as duas formas evita um falso "morto" por causa do prefixo.
+    ids: set[str] = set()
+    for item in modelos:
+        nome = str((item or {}).get("name") or "")
+        if nome:
+            ids.add(nome)
+            ids.add(nome.split("/")[-1])
+    if not ids:
+        raise CatalogoIndisponivel("O catálogo do Gemini veio vazio.")
+    return ids
+
+
 def modelos_configurados(config) -> dict[str, list[str]]:
-    """As duas listas do config, na ordem em que o provedor as tenta."""
-    secao = config.section("llm.openrouter")
+    """As listas do config, na ordem em que cada provedor as tenta."""
+    openrouter = config.section("llm.openrouter")
+    gemini = config.section("llm.gemini")
+    do_gemini = [str(m) for m in (gemini.get("models") or [])]
+    if not do_gemini and gemini.get("model"):
+        do_gemini = [str(gemini["model"])]
     return {
-        "raciocínio": [str(m) for m in (secao.get("models") or [])],
-        "visão": [str(m) for m in (secao.get("vision_models") or [])],
+        # O Gemini vem primeiro porque é o papel de PERCEPÇÃO: sem ele, o
+        # comando falado não vira texto e o James fica surdo. Um modelo morto
+        # aqui derruba mais que um modelo morto no raciocínio.
+        "gemini": do_gemini,
+        "raciocínio": [str(m) for m in (openrouter.get("models") or [])],
+        "visão": [str(m) for m in (openrouter.get("vision_models") or [])],
     }
 
 
-def conferir(config, catalogo: set[str]) -> dict[str, list[tuple[str, bool]]]:
-    return {
-        papel: [(modelo, modelo in catalogo) for modelo in lista]
-        for papel, lista in modelos_configurados(config).items()
-    }
+def conferir(
+    config, catalogo: set[str], catalogo_gemini: set[str] | None = None
+) -> dict[str, list[tuple[str, bool]]]:
+    """Cada papel contra o catálogo do provedor certo.
+
+    `catalogo_gemini=None` significa "não deu para perguntar" — e aí os
+    modelos do Gemini saem de fora do relatório em vez de aparecerem como
+    mortos. Não conseguir conferir não é o mesmo que estar morto.
+    """
+    resultado: dict[str, list[tuple[str, bool]]] = {}
+    for papel, lista in modelos_configurados(config).items():
+        if papel == "gemini":
+            if catalogo_gemini is None:
+                continue
+            resultado[papel] = [(m, m in catalogo_gemini) for m in lista]
+        else:
+            resultado[papel] = [(m, m in catalogo) for m in lista]
+    return resultado
 
 
 def _imprimir(resultado: dict[str, list[tuple[str, bool]]]) -> list[str]:
@@ -131,6 +193,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", help="saída em JSON")
     args = parser.parse_args(argv)
 
+    load_env()
     try:
         config = load_config()
     except ConfigError as exc:
@@ -146,7 +209,24 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Não deu para conferir: {exc}", file=sys.stderr)
         return 3
 
-    resultado = conferir(config, catalogo)
+    # O catálogo do Gemini exige chave; sem ela, aquele papel é omitido do
+    # relatório com uma linha explicando — em vez de sumir em silêncio.
+    catalogo_gemini = None
+    chave = get_secret("GEMINI_API_KEY")
+    if chave:
+        try:
+            catalogo_gemini = buscar_catalogo_gemini(chave)
+        except CatalogoIndisponivel as exc:
+            print(f"Aviso: não consegui conferir o Gemini ({exc}).", file=sys.stderr)
+    else:
+        print(
+            "Aviso: GEMINI_API_KEY ausente — os modelos do Gemini não foram "
+            "conferidos. É justamente o papel de percepção: um modelo morto "
+            "ali deixa o James surdo.",
+            file=sys.stderr,
+        )
+
+    resultado = conferir(config, catalogo, catalogo_gemini)
 
     if args.json:
         print(json.dumps(

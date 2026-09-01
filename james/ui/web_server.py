@@ -115,7 +115,10 @@ class WebInterfaceServer:
             daemon=True,
         )
         self._thread.start()
-        logger.info("Interface holográfica em %s", self.url)
+        # A porta, NUNCA a URL: `self.url` carrega o token de sessão, e o log
+        # vai para arquivo — que acaba em ZIP, em print de tela, em anexo de
+        # e-mail pedindo ajuda. Um token num log é um token público.
+        logger.info("Interface holográfica em http://127.0.0.1:%d/", self.porta)
         audit("interface_web_ligada", porta=self.porta)
         return self.url
 

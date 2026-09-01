@@ -25,6 +25,11 @@ from urllib.parse import unquote, urlsplit
 
 from james.config import Config, normalize_text
 from james.permissions.paths import PathGuard, PathNotAllowed
+from james.security.enderecos import (
+    EnderecoBloqueado,
+    motivo_ip_bloqueado,
+    validar_host,
+)
 from james.security.sanitizer import strip_dangerous_chars
 
 MAX_URL_LENGTH = 2048
@@ -622,24 +627,33 @@ class Guard:
         )
 
     def _blocked_ip_reason(self, host: str) -> str | None:
-        """Barra IPs que não deveriam ser alcançados por comando de voz.
+        """Barra endereços que não deveriam ser alcançados por comando de voz.
 
-        Cobre loopback, rede privada, link-local (inclui o 169.254.169.254 de
-        metadados de nuvem) e reservados — sem precisar listar cada um no
-        config.
+        Delega para `security/enderecos.py`, que é a MESMA regra usada pelo
+        fetch HTTP. Antes a lógica morava só aqui, e o fetch seguia
+        redirecionamento sem consultá-la — validar uma vez não é validar
+        sempre.
+
+        AQUI NÃO SE RESOLVE DNS, e isso é escolha de camada, não descuido.
+
+        A primeira tentativa resolvia, e estava errada por dois motivos. Um
+        domínio fora do ar virava "não abro endereços internos" — mentira, e
+        mentira que treina a pessoa a ignorar o aviso. E toda URL passava a
+        pagar uma consulta de DNS antes de o James responder, no caminho de
+        voz, numa rede de ~1.900 ms.
+
+        Pior: validar aqui não protegeria de verdade. Entre o guard aprovar e
+        a conexão acontecer, o DNS pode mudar de resposta. A checagem que vale
+        é a que fica **colada na conexão** — e ela existe, em
+        `web/safe_http.py`, que resolve e confere cada salto.
+
+        Então a divisão é: o guard decide se a URL tem forma permitida (rápido,
+        determinístico); quem conecta confere para onde ela aponta de fato.
         """
         try:
-            address = ipaddress.ip_address(host)
-        except ValueError:
-            return None
-        if address.is_loopback:
-            return f"'{host}' é loopback"
-        if address.is_private:
-            return f"'{host}' é endereço de rede privada"
-        if address.is_link_local:
-            return f"'{host}' é link-local (metadados de nuvem)"
-        if address.is_reserved or address.is_unspecified or address.is_multicast:
-            return f"'{host}' é endereço reservado"
+            validar_host(host, resolver_dns=False)
+        except EnderecoBloqueado as exc:
+            return str(exc)
         return None
 
     def _is_blocked_domain(self, host: str) -> bool:

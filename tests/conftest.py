@@ -13,6 +13,12 @@ _CREDENCIAIS = (
     "GEMINI_API_KEY",
     "OPENROUTER_API_KEY",
     "PORCUPINE_ACCESS_KEY",
+    # As duas de voz entraram depois e a tupla não acompanhou. A falha aqui é
+    # mais cara que nos outros: as chaves de LLM cobram por requisição, mas as
+    # de voz cobram por CARACTERE — uma suíte que sintetizasse por engano
+    # comeria a cota do mês inteira sem ninguém perceber.
+    "ELEVENLABS_API_KEY",
+    "LMNT_API_KEY",
 )
 
 

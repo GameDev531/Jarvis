@@ -80,7 +80,17 @@ llm:
     vision: [gemini, openrouter]   # parte do catálogo :free enxerga imagem
 
   gemini:
-    model: gemini-2.5-flash
+    # LISTA, não um ID. O `gemini-2.5-flash` fixo aqui virou 404 quando o
+    # Google o aposentou (desligamento em 16/10/2026, mas já recusando antes) —
+    # e como a percepção de áudio só tinha o Gemini, o caminho de voz INTEIRO
+    # parou. A mesma coisa já tinha acontecido com o catálogo :free do
+    # OpenRouter. Um ID de modelo é dependência que se move sozinha.
+    #
+    # Confira de tempos em tempos:  python check_modelos.py
+    models:
+      - gemini-3.5-flash
+      - gemini-3.7-flash
+      - gemini-2.5-flash        # aposentado; fica como último recurso
     thinking_budget: 0        # desliga o "thinking" — latência menor no caminho de voz
     timeout_s: 30
     max_output_tokens: 800

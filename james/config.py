@@ -6,6 +6,7 @@ lido aqui — nunca é inferido pelo LLM em runtime.
 
 from __future__ import annotations
 
+import math
 import os
 import unicodedata
 from dataclasses import dataclass
@@ -56,10 +57,19 @@ class AudioFormat:
         return self.frame_samples * self.channels * self.sample_width
 
     def ms_to_frames(self, milliseconds: float) -> int:
-        """Converte duração em número de frames, arredondando para cima."""
+        """Duração em frames, arredondando PARA CIMA (`ceil`, não `round`).
+
+        O docstring já dizia "para cima" e o código usava `round()`. Com frames
+        de 30 ms, `end_silence_ms: 700` virava 23 frames = 690 ms: o James
+        cortava a fala 10 ms antes do configurado, e sempre para menos.
+
+        Arredondar para baixo aqui é sempre o erro pior. Estes números viram
+        janelas de silêncio e tetos de gravação — ficar aquém corta a última
+        sílaba de quem fala devagar; passar um pouco só custa 30 ms de espera.
+        """
         if milliseconds <= 0:
             return 0
-        return max(1, int(round(milliseconds / self.frame_ms)))
+        return max(1, math.ceil(milliseconds / self.frame_ms))
 
     def bytes_to_ms(self, num_bytes: int) -> float:
         bytes_per_second = self.sample_rate * self.channels * self.sample_width
@@ -168,8 +178,9 @@ class Config:
         model = self.resolve_path("stt.model")
         if binary is None or not binary.exists():
             warnings.append(
-                "stt.binary não configurado — sem whisper.cpp não há modo offline "
-                "nem confirmação de ações de risco."
+                "stt.binary não configurado — sem whisper.cpp não há modo offline. "
+                "A confirmação de ações de risco continua funcionando pela janela "
+                "(com PIN, se configurado); só o caminho por voz fica de fora."
             )
         elif model is None or not model.exists():
             warnings.append(f"Modelo do whisper.cpp não encontrado em {model}.")
@@ -181,10 +192,35 @@ class Config:
                 f"audio.vad.aggressiveness={aggressiveness} fora de 0..3; usando 2."
             )
 
-        rpm = int(self.get("llm.rate_limit.requests_per_minute", 10))
-        rpd = int(self.get("llm.rate_limit.requests_per_day", 240))
-        if rpm <= 0 or rpd <= 0:
-            warnings.append("llm.rate_limit com valor <= 0 — o James não faria requisição nenhuma.")
+        # A cota é POR PROVEDOR (`llm.rate_limit.gemini.*`), mas a validação
+        # lia `llm.rate_limit.requests_per_minute` — uma chave que o YAML não
+        # tem. Resultado: ela sempre encontrava o padrão 10/240, achava tudo
+        # bem, e um `requests_per_day: 0` no arquivo passava sem uma palavra —
+        # deixando o James mudo com o aviso desligado.
+        limites = self.section("llm.rate_limit")
+        for provedor, valores in (limites or {}).items():
+            if not isinstance(valores, dict):
+                warnings.append(
+                    f"llm.rate_limit.{provedor} deveria ser um bloco por provedor "
+                    "(requests_per_minute / requests_per_day)."
+                )
+                continue
+            for campo in ("requests_per_minute", "requests_per_day"):
+                bruto = valores.get(campo)
+                if bruto is None:
+                    continue
+                try:
+                    valor = int(bruto)
+                except (TypeError, ValueError):
+                    warnings.append(
+                        f"llm.rate_limit.{provedor}.{campo}={bruto!r} não é número."
+                    )
+                    continue
+                if valor <= 0:
+                    warnings.append(
+                        f"llm.rate_limit.{provedor}.{campo}={valor} — o James não "
+                        f"faria requisição nenhuma pelo {provedor}."
+                    )
 
         return warnings
 

@@ -110,9 +110,23 @@ def test_config_sem_openrouter_nao_explode():
     assert conferir(Config({}), {"a:free"}) == {"raciocínio": [], "visão": []}
 
 
-def test_le_as_duas_listas():
-    config = config_com(models=["a"], vision=["b"])
-    assert modelos_configurados(config) == {"raciocínio": ["a"], "visão": ["b"]}
+def test_le_as_listas_dos_dois_provedores():
+    """O Gemini entrou depois: era o papel de PERCEPÇÃO sem conferência
+    nenhuma, e foi justamente um modelo morto ali que deixou o James surdo."""
+    config = Config({"llm": {
+        "openrouter": {"models": ["a"], "vision_models": ["b"]},
+        "gemini": {"models": ["g1"]},
+    }})
+    assert modelos_configurados(config) == {
+        "gemini": ["g1"], "raciocínio": ["a"], "visão": ["b"],
+    }
+
+
+def test_config_antigo_com_model_no_singular_ainda_e_lido():
+    """Quem atualizar o código sem mexer no config não pode ficar sem
+    conferência."""
+    config = Config({"llm": {"gemini": {"model": "gemini-2.5-flash"}}})
+    assert modelos_configurados(config)["gemini"] == ["gemini-2.5-flash"]
 
 
 # --------------------------------------------------------------- o veredito

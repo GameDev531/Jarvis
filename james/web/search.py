@@ -21,7 +21,8 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from james.logs import get_logger
+from james.logs import audit, get_logger
+from james.web.safe_http import NomeNaoResolvido, RedirecionamentoBloqueado, obter
 
 logger = get_logger("james.web.search")
 
@@ -158,12 +159,19 @@ def search_web(consulta: str, limite: int = 5) -> list[SearchResult]:
         raise SearchError("Pacote 'httpx' não instalado.") from exc
 
     try:
-        with httpx.Client(timeout=_TIMEOUT_S, headers=_HEADERS, follow_redirects=True) as client:
+        # `follow_redirects=False`: quem segue os saltos é `obter`, validando
+        # cada destino. Ver james/web/safe_http.py.
+        with httpx.Client(timeout=_TIMEOUT_S, headers=_HEADERS, follow_redirects=False) as client:
             # POST é o que o formulário do endpoint HTML usa; com GET o
             # buscador às vezes devolve a página de consentimento em vez dos
             # resultados.
-            resposta = client.post(_ENDPOINT, data={"q": texto[:400]})
+            resposta = obter(client, _ENDPOINT, metodo="POST", data={"q": texto[:400]})
             resposta.raise_for_status()
+    except RedirecionamentoBloqueado as exc:
+        # Não é falha de rede: é uma tentativa de levar o James para dentro da
+        # rede local. Dizer "não consegui buscar" esconderia isso.
+        audit("redirecionamento_bloqueado", origem="busca", motivo=str(exc))
+        raise SearchError(f"Busca interrompida por segurança: {exc}") from exc
     except Exception as exc:  # noqa: BLE001 — httpx tem vários tipos de erro
         raise SearchError(f"Não consegui fazer a busca: {exc}") from exc
 
@@ -183,9 +191,14 @@ def fetch_page(url: str, max_chars: int = 8000) -> tuple[str, str]:
         raise SearchError("Pacote 'httpx' não instalado.") from exc
 
     try:
-        with httpx.Client(timeout=_TIMEOUT_S, headers=_HEADERS, follow_redirects=True) as client:
-            resposta = client.get(url)
+        with httpx.Client(timeout=_TIMEOUT_S, headers=_HEADERS, follow_redirects=False) as client:
+            resposta = obter(client, url)
             resposta.raise_for_status()
+    except NomeNaoResolvido as exc:
+        raise SearchError(f"Endereço não resolveu: {exc}") from exc
+    except RedirecionamentoBloqueado as exc:
+        audit("redirecionamento_bloqueado", origem="pagina", url=url, motivo=str(exc))
+        raise SearchError(f"Página recusada por segurança: {exc}") from exc
     except Exception as exc:  # noqa: BLE001
         raise SearchError(f"Não consegui abrir a página: {exc}") from exc
 
