@@ -126,6 +126,19 @@ class Guard:
             # da máquina, e fechar a janela desfaz. Nível 1.
             "projetar_holograma": self._rule_sem_risco,
             "fechar_hologramas": self._rule_sem_risco,
+            # --- navegador ---
+            # Ler é Nível 1: abrir uma aba e inspecionar não mudam o mundo.
+            # A URL passa pela MESMA validação de abrir_pagina — esquema, host
+            # interno, domínio bloqueado.
+            "abrir_aba": self._rule_abrir_aba,
+            "listar_abas": self._rule_sem_risco,
+            "inspecionar_pagina": self._rule_sem_risco,
+            # Agir é Nível 2: clicar pode comprar uma passagem, e preencher
+            # pode mandar um formulário. Acima disto há o que é IMPOSSÍVEL —
+            # campo de senha e upload são recusados em browser/actions.py, e
+            # nenhuma confirmação destrava.
+            "preencher_campo": self._rule_agir_no_navegador,
+            "clicar_em": self._rule_agir_no_navegador,
             "ativar_modo": self._rule_ativar_modo,
             # Desligar é Nível 1 sempre, por princípio (ver a regra).
             "desativar_modo": self._rule_desativar_modo,
@@ -232,6 +245,35 @@ class Guard:
 
     def _rule_ler_pagina(self, args: dict[str, Any]) -> GuardVerdict:
         return self._analyze_url("ler_pagina", str(args.get("url", "") or ""))
+
+    def _rule_abrir_aba(self, args: dict[str, Any]) -> GuardVerdict:
+        """Abrir aba é navegar: mesma validação de URL de abrir_pagina.
+
+        Ter uma regra própria em vez de reaproveitar a de `abrir_pagina` seria
+        criar uma segunda porta para a mesma casa — e a segunda porta é sempre
+        a que alguém esquece de trancar.
+        """
+        return self._analyze_url("abrir_aba", str(args.get("url", "") or ""))
+
+    def _rule_agir_no_navegador(self, args: dict[str, Any]) -> GuardVerdict:
+        """Preencher e clicar: Nível 2, sempre.
+
+        Um clique pode confirmar uma compra, enviar um e-mail ou apagar uma
+        conta, e o guard não tem como saber qual botão é qual — a página é de
+        terceiro e o rótulo pode mentir. Quando não dá para distinguir o
+        inofensivo do irreversível, o certo é perguntar.
+        """
+        seletor = str(args.get("seletor", "") or "").strip()
+        return GuardVerdict(
+            tool="navegador",
+            decision=Decision.CONFIRM,
+            reason="acao no navegador pode ser irreversivel",
+            spoken=(
+                f"Vou agir em {seletor} na página aberta. "
+                f"Confirma, {self.treatment}?"
+            ),
+            args=args,
+        )
 
     def _rule_pesquisar_web(self, args: dict[str, Any]) -> GuardVerdict:
         raw_query = strip_dangerous_chars(str(args.get("query", "") or "")).strip()

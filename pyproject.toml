@@ -35,10 +35,14 @@ camera = ["opencv-python>=4.9"]
 wakeword = ["openwakeword>=0.6", "onnxruntime>=1.16"]
 # O Porcupine continua suportado para quem já tem chave.
 porcupine = ["pvporcupine>=3.0"]
+# Controle do navegador (modo Ultron): abrir abas, preencher formulários,
+# inspecionar páginas. Prefira ANEXAR ao Chrome que você já tem — nesse caso
+# `python -m playwright install` nem é preciso, e economiza ~150 MB.
+navegador = ["playwright>=1.40"]
 # Modo de gestos. Só é usado enquanto o modo está ligado — sem estes pacotes o
 # resto do James funciona igual, e ligar o modo devolve uma frase explicando.
 gestures = ["opencv-python>=4.9", "mediapipe>=0.10.14"]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "openwakeword>=0.6", "onnxruntime>=1.16"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "openwakeword>=0.6", "onnxruntime>=1.16", "playwright>=1.40"]
 
 [project.scripts]
 james = "james.runtime.wake_listener:main"

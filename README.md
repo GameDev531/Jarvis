@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 18 implementadas. 931 testes automatizados.
+**Estado atual:** Fases 0 a 19 implementadas. 973 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -175,6 +175,61 @@ cache; depois disso funciona sem rede. O código dele é Apache 2.0,
 mas os **modelos pré-treinados são CC-BY-NC-SA 4.0** (uso não comercial) —
 para um assistente pessoal está tudo certo; se um dia isto virar produto, será
 preciso treinar modelos próprios, o que o projeto suporta.
+
+### Modo navegador: o Ultron com as mãos no Chrome
+
+```
+"liga o navegador"                    (pede confirmação — veja abaixo)
+"abre a página X"
+"revisa essa página pra mim"          → relatório de QA
+"preenche o campo de e-mail com ..."  (pede confirmação)
+```
+
+**Ele anexa ao Chrome que você já usa**, em vez de baixar um navegador
+próprio. Ganha o seu perfil — contas, cookies, extensões — e economiza ~150 MB
+de download. Para isso o Chrome precisa subir com a porta de depuração:
+
+```powershell
+chrome.exe --remote-debugging-port=9222
+```
+
+Sem isso ele abre um navegador próprio, de perfil limpo, e avisa. Para forçar
+esse caminho: `modos.navegador.anexar: false`.
+
+**Ligar pede confirmação** pelo mesmo motivo da webcam, e o motivo é mais forte
+aqui: anexado ao seu Chrome, ele enxerga as abas abertas — onde estão seu
+e-mail, seu banco e seu trabalho. É mais íntimo que a câmera, não menos.
+
+#### O inspetor de QA
+
+`inspecionar_pagina` lê o DOM e aponta o que é **fato**, sem gastar requisição
+de modelo: página sem `<h1>`, títulos pulando nível, imagem sem `alt`, botão
+sem nome acessível, campo sem rótulo, link "clique aqui", alvo de toque menor
+que 24 px, rolagem horizontal. Cada achado vem com o seletor CSS, para o passo
+seguinte poder apontar o elemento.
+
+Acessibilidade e estrutura não são questão de opinião: ou o botão tem nome, ou
+não tem. O que é gosto — se o azul combina, se o espaçamento respira —
+continua sendo trabalho do modelo de visão.
+
+#### Três níveis, e o terceiro não abre
+
+| | |
+|---|---|
+| **Nível 1** | abrir aba, listar abas, inspecionar — não mudam nada |
+| **Nível 2** | preencher campo, clicar — pedem confirmação |
+| **Impossível** | senha, upload de arquivo, cartão, CPF, token |
+
+A terceira linha não é "arriscada", é **recusada**, e nenhuma confirmação
+destrava. O motivo não é o óbvio: o risco não é ele digitar errado, é digitar
+no *campo errado*. `input[type=password]` e `input[type=text]` são irmãos no
+DOM, e a distância entre preencher um formulário e vazar uma credencial para o
+histórico do modelo é um atributo.
+
+Por isso a checagem pergunta à **página** o que o campo é, antes de digitar —
+não ao modelo, que poderia afirmar que um campo de senha é um campo de e-mail.
+Reconhece `senha`, `password`, `cc-number`, `cvv`, `cpf`, `api_key` e as
+variantes com hífen, sublinhado ou espaço.
 
 ### A persona: regra diz o que evitar, exemplo diz quem ser
 
@@ -997,7 +1052,7 @@ por voz sai **uma vez**, não a cada turno.
 ## Testes
 
 ```bash
-python -m pytest tests/ -q          # 931 testes
+python -m pytest tests/ -q          # 973 testes
 ```
 
 | Arquivo | O que cobre |
@@ -1042,6 +1097,7 @@ python -m pytest tests/ -q          # 931 testes
 | `test_voz_cadeia.py` | Orçamento de caracteres, queda para o local, API real |
 | `test_saudacao.py` | Frase por período, apresentação única, marca em disco |
 | `test_system_prompt.py` | Exemplos de fala, proibição de cardápio, proporção de regras |
+| `test_navegador.py` | Travas de campo sensível, níveis do guard, inspetor em página real |
 | `test_hotkey.py` | Interpretação do atalho |
 
 ---
@@ -1104,6 +1160,7 @@ james/
 - [x] **Fase 15** — interface holográfica (Three.js) como modo
 - [x] **Fase 16** — projeção holográfica: shader, catálogo curado e cascata
 - [x] **Fase 17** — voz na nuvem: cadeia ElevenLabs → Piper com orçamento de caracteres
+- [x] **Fase 19** — modo navegador: QA inspector, formulários com trava determinística
 - [x] **Fase 18** — wake word sem cadastro: openWakeWord, Porcupine e atalho
       atrás do mesmo contrato (uma palavra "James" própria ainda pode ser treinada)
 - [ ] Backlog de ferramentas maiores: ver [PLANO.md](PLANO.md)

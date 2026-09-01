@@ -115,8 +115,11 @@ llm:
     # precisa aceitar `tools`/`tool_choice`. Um modelo sem isso não "responde
     # pior": ele ignora as ferramentas em silêncio e o James vira um chat.
     models:
-      - inclusionai/ling-3.0-flash-fin:free    # 124B MoE, 5,1B ativos — o mais rápido
+      # O GLM na frente por PERSONA, não por velocidade: o Ling é mais rápido,
+      # mas modelo pequeno segura pior um personagem e escorrega de volta para
+      # o tom de atendimento. Numa conversa, soar certo vale mais que 200 ms.
       - z-ai/glm-5.2:free                      # generalista forte, 256k
+      - inclusionai/ling-3.0-flash-fin:free    # 124B MoE, 5,1B ativos — o mais rápido
       - minimax/minimax-m2.7:free              # agêntico, bom com ferramentas
       - dots-studio/dots-3-note-preview:free   # 280B/16B ativos, 512k, também enxerga
       - nvidia/nemotron-3-ultra-550b-a55b:free # o maior — lento, guardado para o difícil
@@ -301,6 +304,28 @@ modos:
   # Deixe vazio para o comportamento antigo (só a janela Qt).
   #   iniciar_com: [holograma]   -> abre a interface holográfica no navegador
   iniciar_com: []
+
+  # O Ultron com as mãos no navegador: abre abas, preenche formulários,
+  # inspeciona páginas como um QA. Ligar pede confirmação — anexado ao SEU
+  # Chrome, ele enxerga as abas abertas, o que é mais íntimo que a webcam.
+  #
+  # O que ele NUNCA faz, com modo ligado ou não: digitar em campo de senha,
+  # mandar arquivo do disco para um site, mexer em campo oculto. A recusa é
+  # determinística (james/browser/actions.py), não depende do julgamento do
+  # modelo, e nenhuma confirmação a destrava.
+  navegador:
+    enabled: true
+
+    # ANEXAR ao Chrome que você já usa, em vez de baixar outro navegador.
+    # Ganha o seu perfil (contas, cookies, extensões) e economiza ~150 MB de
+    # download — o que numa máquina modesta é a diferença entre existir e não.
+    # Exige o Chrome aberto assim:  chrome.exe --remote-debugging-port=9222
+    anexar: true
+    porta: 9222
+
+    # Só usado quando `anexar: false` (navegador próprio, perfil limpo).
+    headless: false
+    timeout_ms: 15000
 
   gestos:
     enabled: true

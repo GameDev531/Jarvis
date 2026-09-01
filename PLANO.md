@@ -29,10 +29,13 @@ descreve por que as coisas são como são e o que falta.
 | 16 — Projeção holográfica | ✅ | Shader, catálogo curado de 14 assuntos, cascata com tetos |
 | 17 — Voz na nuvem | ✅ | Cadeia ElevenLabs → Piper, orçamento de caracteres |
 | 18 — Wake word sem cadastro | ✅ | openWakeWord, Porcupine e atalho atrás do mesmo contrato |
-| 19 — Wake word "James" própria | ⬜ | Treino do modelo pelo openWakeWord |
-| 20 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
+| 19 — Modo navegador | ✅ | Anexa ao Chrome real, inspetor de QA, trava de campo sensível |
+| 20 — Wake word "James" própria | ⬜ | Treino do modelo pelo openWakeWord |
+| 21 — Mapa-múndi holográfico | ⬜ | Zoom até o local real, botão para tirar o shader |
+| 22 — Partida cinematográfica do Ultron | ⬜ | Sequência de despertar na interface |
+| 23 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
 
-**931 testes automatizados.** Piper, whisper.cpp, Qt e câmera continuam sem
+**973 testes automatizados.** Piper, whisper.cpp, Qt e câmera continuam sem
 execução em hardware real — a Fase 0 existe para isso. O openWakeWord é a
 exceção: o motor foi carregado de verdade neste ambiente (modelo `hey_jarvis`,
 ~14 MB baixados, 2,4% de um núcleo em escuta contínua num processador

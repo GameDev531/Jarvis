@@ -46,8 +46,10 @@ def build_registry(
 
     if modes is not None:
         from james.tools import modes as mode_tools
+        from james.tools import navegador as navegador_tools
 
         mode_tools.register(registry, config, guard, modes)
+        navegador_tools.register(registry, config, guard, modes)
 
     if bus is not None:
         from james.tools import holograma

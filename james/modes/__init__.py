@@ -55,6 +55,19 @@ def build_manager(config, *, on_acao=None, bus=None, on_comando=None, on_escutar
                 abrir_navegador=bool(holo.get("abrir_navegador", True)),
             )
         )
+
+    nav = config.section("modos.navegador")
+    if bool(nav.get("enabled", True)):
+        from james.modes.browser import BrowserMode
+
+        manager.register(
+            BrowserMode(
+                anexar=bool(nav.get("anexar", True)),
+                porta=int(nav.get("porta", 9222)),
+                headless=bool(nav.get("headless", False)),
+                timeout_ms=int(nav.get("timeout_ms", 15000)),
+            )
+        )
     return manager
 
 
