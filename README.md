@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 18 implementadas. 925 testes automatizados.
+**Estado atual:** Fases 0 a 18 implementadas. 931 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -175,6 +175,28 @@ cache; depois disso funciona sem rede. O código dele é Apache 2.0,
 mas os **modelos pré-treinados são CC-BY-NC-SA 4.0** (uso não comercial) —
 para um assistente pessoal está tudo certo; se um dia isto virar produto, será
 preciso treinar modelos próprios, o que o projeto suporta.
+
+### A persona: regra diz o que evitar, exemplo diz quem ser
+
+O prompt já mandava "tom competente, seco, levemente espirituoso" — e mesmo
+assim o James soava como chatbot. O motivo estava no formato: **52% das linhas
+de regra eram proibições** ("nunca", "não") e não havia um único exemplo de
+como ele fala. Prompt feito só de proibição produz um modelo cauteloso e duro,
+que é exatamente o que soa como atendimento automático.
+
+Duas mudanças:
+
+- **Exemplos de fala no prompt.** "acorda james, papai chegou" → "Nunca dormi,
+  senhor. Bem-vindo de volta." Um modelo não sabe o que "seco e espirituoso"
+  soa; ele sabe imitar.
+- **Proibição explícita de oferecer serviço.** *"Posso analisar sua tela?"*,
+  *"Em que posso ajudar?"* — nada disso. São 30 ferramentas no catálogo e
+  nenhuma é assunto de conversa. E, junto com a proibição, a alternativa: sem
+  entender o que foi dito, pergunte — não preencha o silêncio oferecendo uma
+  capacidade.
+
+Um teste guarda a proporção de proibições abaixo de 60%, porque é para lá que
+um prompt volta a escorregar sozinho.
 
 ### Ele cumprimenta ao subir, não depois que você fala
 
@@ -975,7 +997,7 @@ por voz sai **uma vez**, não a cada turno.
 ## Testes
 
 ```bash
-python -m pytest tests/ -q          # 925 testes
+python -m pytest tests/ -q          # 931 testes
 ```
 
 | Arquivo | O que cobre |
@@ -1019,6 +1041,7 @@ python -m pytest tests/ -q          # 925 testes
 | `test_wake_engines.py` | Contrato dos três motores, ordem da fábrica, debounce |
 | `test_voz_cadeia.py` | Orçamento de caracteres, queda para o local, API real |
 | `test_saudacao.py` | Frase por período, apresentação única, marca em disco |
+| `test_system_prompt.py` | Exemplos de fala, proibição de cardápio, proporção de regras |
 | `test_hotkey.py` | Interpretação do atalho |
 
 ---
