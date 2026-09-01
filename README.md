@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 19 implementadas. 1001 testes automatizados.
+**Estado atual:** Fases 0 a 20 implementadas. 1031 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -190,6 +190,55 @@ relatório da máquina e o banco de memória.
 O critério é o inverso do intuitivo: em vez de listar o que excluir — e
 esquecer um —, o script pergunta ao git o que é **rastreado**. O que o git não
 versiona não é código do projeto; é dado de execução, e dado de execução é seu.
+
+### AG-UI: o protocolo da central de agentes
+
+```
+POST /ag-ui        Content-Type: application/json
+                   Accept: text/event-stream
+```
+
+O mesmo POST recebe o `RunAgentInput` e mantém a resposta aberta, transmitindo
+os eventos do protocolo — `RUN_STARTED`, `TEXT_MESSAGE_*`, `TOOL_CALL_*`,
+`STATE_DELTA`, `RUN_FINISHED`.
+
+Ele **não substitui** o `/events`. Os dois convivem de propósito: o `/events` é
+uma *transmissão* — todo mundo vê o mesmo, e é assim que o holograma mostra o
+que aconteceu na janela Qt. O `/ag-ui` é 1:1 com uma requisição e tem ciclo de
+execução. Trocar um pelo outro perderia o espectador; ter só o antigo não daria
+`runId`.
+
+#### O guard fica no meio, e isso não é apresentação
+
+```
+TOOL_CALL_END  →  guard decide  →  confirmação  →  executa  →  TOOL_CALL_RESULT
+```
+
+O AG-UI transporta a **intenção** de chamar uma ferramenta e o **resultado**
+dela. Ele não decide se pode. Emitir o resultado antes de o guard falar
+mostraria na tela algo que talvez nunca devesse existir — e sugeriria, a quem
+lê o código, que a execução acontece no protocolo em vez de no guard. O
+validador de ordem recusa `TOOL_CALL_RESULT` antes de `TOOL_CALL_END`, então a
+regra não depende de ninguém lembrar dela.
+
+#### Dois modelos de confiabilidade num canal só
+
+Esta foi a descoberta que justificou desenhar antes de codar. O `StateBus`
+descarta o evento mais antigo quando um assinante não acompanha — política
+**certa** para estado (o próximo evento corrige) e **catastrófica** para
+`TEXT_MESSAGE_CONTENT`, onde o cliente concatena deltas em ordem: um descartado
+faz a frase chegar com um pedaço faltando, e a tela mostra algo que parece
+completo.
+
+A saída foi classificar por natureza:
+
+| | Política |
+|---|---|
+| estado, atividade | pode cair — o próximo corrige |
+| ciclo de vida, mensagem, ferramenta | não pode — o run morre com `RUN_ERROR` |
+
+Falhar alto é melhor que mentir baixo: você vê "a conexão não acompanhou" e
+recarrega, em vez de ler meia resposta achando que foi isso que ele disse.
 
 ### Modo navegador: o Ultron com as mãos no Chrome
 
@@ -1095,7 +1144,7 @@ por voz sai **uma vez**, não a cada turno.
 ## Testes
 
 ```bash
-python -m pytest tests/ -q          # 1001 testes
+python -m pytest tests/ -q          # 1031 testes
 ```
 
 | Arquivo | O que cobre |
@@ -1142,6 +1191,7 @@ python -m pytest tests/ -q          # 1001 testes
 | `test_system_prompt.py` | Exemplos de fala, proibição de cardápio, proporção de regras |
 | `test_navegador.py` | Travas de campo sensível, níveis do guard, inspetor em página real |
 | `test_auditoria.py` | Redirecionamento interno, segredos na suíte, cota por provedor |
+| `test_agui.py` | Gramática do protocolo, descarte por natureza, guard entre intenção e resultado |
 | `test_hotkey.py` | Interpretação do atalho |
 
 ---

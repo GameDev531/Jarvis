@@ -33,6 +33,12 @@ logger = get_logger("james.ui.bus")
 # encher, é porque o consumidor parou de ler.
 _TAMANHO_DA_FILA = 64
 
+# Acontecimentos, não estado: guardá-los faria a tela repetir a última fala a
+# cada recarga. Virou constante quando o adaptador AG-UI passou a precisar da
+# MESMA fronteira — duas listas iguais em arquivos diferentes é uma lista
+# desatualizada esperando acontecer.
+CHAVES_EFEMERAS = frozenset({"log", "transcricao", "resposta"})
+
 
 class Subscriber:
     """Uma ligação viva com o barramento. Feche quando terminar."""
@@ -92,7 +98,7 @@ class StateBus:
             # `log`, `transcricao` e `resposta` são acontecimentos, não estado:
             # guardá-los faria a tela repetir a última fala a cada recarga.
             for chave, valor in dados.items():
-                if chave not in ("log", "transcricao", "resposta"):
+                if chave not in CHAVES_EFEMERAS:
                     self._estado[chave] = valor
             assinantes = list(self._assinantes)
 

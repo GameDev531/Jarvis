@@ -49,6 +49,11 @@ logger = get_logger("james.ui.web")
 
 # Texto maior que isto não é comando de voz, é tentativa de entupir o processo.
 MAX_COMANDO = 2000
+
+# Teto de sessões AG-UI simultâneas. Cada uma segura duas threads do servidor
+# (a bomba e o escritor) e uma fila; sem limite, abrir abas seria um jeito
+# trivial de derrubar o James da própria máquina de quem o roda.
+MAX_RUNS = 4
 _MAX_CORPO = 8192
 
 # De quanto em quanto tempo o SSE manda um comentário de keep-alive. Sem isso,
@@ -87,6 +92,9 @@ class WebInterfaceServer:
         self.modelos = Path(modelos).resolve() if modelos else None
         self.bus = bus
         self.on_comando = on_comando
+        # Runs AG-UI abertos. Cada um segura uma thread do servidor e uma fila.
+        self._runs: list = []
+        self._lock_runs = threading.Lock()
         self.on_escutar = on_escutar
         self.porta_pedida = int(porta)
         self.token = secrets.token_urlsafe(24)
@@ -194,6 +202,45 @@ class WebInterfaceServer:
         self.on_comando(texto)
         return True, "aceito"
 
+    # ------------------------------------------------------------- AG-UI
+
+    def abrir_run(self, thread_id: str, run_id: str | None = None):
+        """Abre um run e o registra como destino dos eventos do barramento.
+
+        O run é o assinante — e um assinante que só vive enquanto a resposta
+        acontece. Quem consome é a requisição HTTP que está com a conexão
+        aberta; quando ela fecha, o run morre com ela.
+
+        Um teto de runs simultâneos porque cada um segura uma thread do
+        servidor e uma fila: sem limite, abrir abas seria um jeito trivial de
+        derrubar o James da própria máquina dele.
+        """
+        from james.agui.fluxo import FluxoDeRun
+
+        with self._lock_runs:
+            vivos = [r for r in self._runs if not r.terminou]
+            self._runs = vivos
+            if len(vivos) >= MAX_RUNS:
+                # Encerra o mais antigo em vez de recusar o novo: quem acabou
+                # de pedir está olhando a tela agora.
+                antigo = vivos.pop(0)
+                antigo.falhar("Substituído por uma sessão mais nova.", "muitos_runs")
+
+            fluxo = FluxoDeRun(thread_id, run_id)
+            self._runs.append(fluxo)
+
+        fluxo.iniciar()
+        # Estado atual primeiro: o cliente acabou de conectar e precisa de um
+        # instantâneo antes de qualquer delta fazer sentido.
+        from james.agui.adaptador import AdaptadorDeEstado
+
+        adaptador = AdaptadorDeEstado(fluxo)
+        adaptador.snapshot(self.bus.snapshot())
+        fluxo.adaptador = adaptador
+        audit("agui_run_aberto", thread=thread_id, run=fluxo.run_id)
+        return fluxo
+
+
 
 def _build_handler(app: WebInterfaceServer):
     class Handler(BaseHTTPRequestHandler):
@@ -297,7 +344,7 @@ def _build_handler(app: WebInterfaceServer):
                 self._json(200, {"ok": True})
                 return
 
-            if rota != "/comando":
+            if rota not in ("/comando", "/ag-ui"):
                 self._json(404, {"erro": "rota desconhecida"})
                 return
 
@@ -307,7 +354,85 @@ def _build_handler(app: WebInterfaceServer):
                 self._json(400, {"erro": "json invalido"})
                 return
 
+            if rota == "/ag-ui":
+                self._ag_ui(dados)
+                return
+
             ok, motivo = app.executar_comando(dados.get("texto", ""))
             self._json(200 if ok else 400, {"ok": ok, "motivo": motivo})
+
+        def _ag_ui(self, entrada: dict) -> None:
+            """POST que responde em SSE — o transporte padrão do AG-UI.
+
+            Diferente do `/events`, que é uma TRANSMISSÃO: lá todo mundo vê o
+            mesmo, e é assim que o holograma mostra o que aconteceu na janela
+            Qt. Aqui o fluxo é 1:1 com esta requisição, é dela que sai o
+            `runId`, e ele fecha quando o run termina.
+
+            Os dois convivem de propósito. Trocar um pelo outro perderia o
+            espectador; ter só o `/events` não daria ciclo de execução.
+            """
+            if app.on_comando is None:
+                self._json(503, {"erro": "sem orquestrador para atender"})
+                return
+
+            thread_id = str(entrada.get("threadId") or "").strip() or "thread-padrao"
+            mensagens = entrada.get("messages") or []
+            texto = ""
+            for mensagem in reversed(mensagens):
+                if isinstance(mensagem, dict) and mensagem.get("role") == "user":
+                    texto = str(mensagem.get("content") or "").strip()
+                    break
+            if not texto:
+                self._json(400, {"erro": "nenhuma mensagem de usuario"})
+                return
+
+            fluxo = app.abrir_run(thread_id, str(entrada.get("runId") or "") or None)
+
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+
+            # Duas threads, uma conexão. A bomba lê do barramento e traduz;
+            # esta escreve no socket. Separadas porque o barramento entrega
+            # quando quer e o socket bloqueia quando o cliente é lento — juntar
+            # as duas faria a lentidão de um virar atraso do outro.
+            parar = threading.Event()
+            bomba = threading.Thread(
+                target=self._bombear, args=(fluxo, parar),
+                name=f"agui-{fluxo.run_id}", daemon=True,
+            )
+            bomba.start()
+
+            # O comando entra DEPOIS de a bomba estar de pé: entrar antes
+            # perderia os primeiros eventos, que são justamente os que dizem
+            # que o James começou a trabalhar.
+            app.executar_comando(texto)
+
+            try:
+                for pedaco in fluxo.sse():
+                    self.wfile.write(pedaco.encode("utf-8"))
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                # A aba fechou. Não é erro: o run morre junto.
+                logger.debug("Cliente AG-UI desconectou do run %s.", fluxo.run_id)
+            finally:
+                parar.set()
+
+        def _bombear(self, fluxo, parar) -> None:
+            """Barramento -> adaptador -> run, até o run acabar.
+
+            Um assinante POR RUN, e não um registro global de runs: cada um tem
+            a própria fila, e um cliente lento não atrasa o outro. É a mesma
+            razão de o `StateBus` já dar uma fila por assinante.
+            """
+            adaptador = fluxo.adaptador
+            with app.bus.subscribe() as assinante:
+                while not parar.is_set() and not fluxo.terminou:
+                    evento = assinante.receber(timeout=0.5)
+                    if evento:
+                        adaptador.publicar(evento)
 
     return Handler
