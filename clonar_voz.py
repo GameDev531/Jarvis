@@ -27,11 +27,48 @@ from james.voice.lmnt_tts import clonar_voz  # noqa: E402
 from james.voice.tts import TTSUnavailable  # noqa: E402
 
 
+def _achar_amostra(partes):
+    """Junta os pedaços de volta num caminho, se isso formar um arquivo real.
+
+    O shell parte "Iron Man.mp3" em dois argumentos quando não há aspas.
+    Testar o nome inteiro primeiro resolve o caso comum sem adivinhação: ou o
+    arquivo existe com aquele nome, ou não existe e o erro é dito de forma
+    útil.
+    """
+    inteiro = Path(" ".join(partes))
+    if inteiro.exists():
+        return inteiro
+    # Um argumento só que não existe: devolver None dá a mensagem certa.
+    if len(partes) == 1:
+        return None
+    # Vários pedaços e nenhum caminho válido — talvez o primeiro sozinho sirva.
+    primeiro = Path(partes[0])
+    return primeiro if primeiro.exists() else None
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Clona uma voz na LMNT.")
-    parser.add_argument("amostra", help="arquivo de áudio com a voz de referência")
+    # `nargs="+"` porque nome de arquivo com espaço é a regra, não a exceção,
+    # e no Windows a pessoa digita sem aspas. Sem isto, "Iron Man.mp3" chega
+    # como dois argumentos e o argparse reclama de algo que não é o problema.
+    parser.add_argument(
+        "amostra", nargs="+", help="arquivo de áudio com a voz de referência"
+    )
     parser.add_argument("--nome", default="james", help="nome da voz na sua conta")
     args = parser.parse_args(argv)
+
+    caminho = _achar_amostra(args.amostra)
+    if caminho is None:
+        alvo = " ".join(args.amostra)
+        print(f"Arquivo não encontrado: {alvo}", file=sys.stderr)
+        print(
+            "\nSe o nome tem espaços ou parênteses, ponha entre aspas simples:\n"
+            f"    python clonar_voz.py '{alvo}'\n"
+            "\nParêntese é sintaxe do PowerShell, então nesse caso as aspas não "
+            "são opcionais.",
+            file=sys.stderr,
+        )
+        return 2
 
     load_env()
     chave = get_secret("LMNT_API_KEY")
@@ -41,11 +78,6 @@ def main(argv=None) -> int:
             "em https://app.lmnt.com",
             file=sys.stderr,
         )
-        return 2
-
-    caminho = Path(args.amostra)
-    if not caminho.exists():
-        print(f"Arquivo não encontrado: {caminho}", file=sys.stderr)
         return 2
 
     print(f"Enviando {caminho.name} ({caminho.stat().st_size // 1024} KB)…")

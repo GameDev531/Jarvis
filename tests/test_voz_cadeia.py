@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from datetime import date
 
+from pathlib import Path
+
 import pytest
 
 from james.voice.budget import CharacterBudget
@@ -456,3 +458,36 @@ def test_clonar_diz_quando_a_amostra_nao_existe(tmp_path):
     from james.voice.lmnt_tts import clonar_voz
     with pytest.raises(TTSUnavailable, match="não encontrada"):
         clonar_voz("chave", tmp_path / "nao-existe.mp3")
+
+
+# ---------------------------------------- o script de clone, no Windows
+
+# "python clonar_voz.py Iron Man - Jarvis bom dia(MP3_160K).mp3" no PowerShell
+# falha antes de o Python rodar: parêntese é sintaxe de subexpressão e ele
+# tenta EXECUTAR o miolo do nome. Espaço sozinho é mais comum ainda, e esse dá
+# para resolver do lado de cá.
+
+def test_nome_com_espaco_sem_aspas_e_remontado(tmp_path):
+    """O shell parte "Iron Man.mp3" em dois argumentos. Juntar de volta só vale
+    se formar um arquivo real — nada de adivinhação."""
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from clonar_voz import _achar_amostra
+
+    alvo = tmp_path / "Iron Man - Jarvis.mp3"
+    alvo.write_bytes(b"\x00" * 2048)
+    assert _achar_amostra([str(tmp_path / "Iron"), "Man", "-", "Jarvis.mp3"]) == alvo
+
+
+def test_arquivo_inexistente_devolve_nada(tmp_path):
+    """Sem isto, um nome errado viraria upload de lixo e gastaria a cota."""
+    from clonar_voz import _achar_amostra
+    assert _achar_amostra([str(tmp_path / "nao-existe.mp3")]) is None
+    assert _achar_amostra(["nada", "disso", "existe.mp3"]) is None
+
+
+def test_caminho_com_aspas_funciona_direto(tmp_path):
+    from clonar_voz import _achar_amostra
+    alvo = tmp_path / "amostra.mp3"
+    alvo.write_bytes(b"\x00" * 2048)
+    assert _achar_amostra([str(alvo)]) == alvo

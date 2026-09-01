@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 18 implementadas. 911 testes automatizados.
+**Estado atual:** Fases 0 a 18 implementadas. 914 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -201,6 +201,13 @@ amostra e a troca fica quase imperceptível.
 
 ```bash
 python clonar_voz.py minha-amostra.mp3
+```
+
+No PowerShell, nome com espaço ou parêntese precisa de aspas simples — o
+parêntese é sintaxe de subexpressão e o shell tenta executar o miolo do nome:
+
+```powershell
+python clonar_voz.py 'Iron Man - Jarvis(MP3_160K).mp3'
 ```
 
 Ele imprime o `voice id` para colar em `voz.lmnt.voz`. Depois clone a mesma
@@ -953,7 +960,7 @@ por voz sai **uma vez**, não a cada turno.
 ## Testes
 
 ```bash
-python -m pytest tests/ -q          # 911 testes
+python -m pytest tests/ -q          # 914 testes
 ```
 
 | Arquivo | O que cobre |
