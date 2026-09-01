@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 18 implementadas. 914 testes automatizados.
+**Estado atual:** Fases 0 a 18 implementadas. 925 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -175,6 +175,21 @@ cache; depois disso funciona sem rede. O código dele é Apache 2.0,
 mas os **modelos pré-treinados são CC-BY-NC-SA 4.0** (uso não comercial) —
 para um assistente pessoal está tudo certo; se um dia isto virar produto, será
 preciso treinar modelos próprios, o que o projeto suporta.
+
+### Ele cumprimenta ao subir, não depois que você fala
+
+O James diz uma frase assim que está de pé — antes de qualquer comando. Na
+primeira execução da instalação ele se apresenta; nas seguintes, cumprimenta e
+pronto.
+
+A frase é montada **localmente**, sem passar por modelo nenhum. Cumprimentar é
+hora do dia mais um nome, não raciocínio, e fazer localmente rende três coisas:
+zero requisição da cota diária, zero espera de rede (o que importa numa conexão
+lenta — senão o James sobe e fica mudo alguns segundos), e funciona offline.
+
+O silêncio entre saudações (`behavior.saudacao_intervalo_s`, 15 min por padrão)
+existe por causa do watchdog: num ciclo de queda, o James cumprimentaria a cada
+reinício.
 
 ### A voz tem três degraus
 
@@ -960,7 +975,7 @@ por voz sai **uma vez**, não a cada turno.
 ## Testes
 
 ```bash
-python -m pytest tests/ -q          # 914 testes
+python -m pytest tests/ -q          # 925 testes
 ```
 
 | Arquivo | O que cobre |
@@ -1003,6 +1018,7 @@ python -m pytest tests/ -q          # 914 testes
 | `test_wake_listener.py` | Reagrupamento de frames, tamanho exigido pelo motor |
 | `test_wake_engines.py` | Contrato dos três motores, ordem da fábrica, debounce |
 | `test_voz_cadeia.py` | Orçamento de caracteres, queda para o local, API real |
+| `test_saudacao.py` | Frase por período, apresentação única, marca em disco |
 | `test_hotkey.py` | Interpretação do atalho |
 
 ---

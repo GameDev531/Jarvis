@@ -62,3 +62,26 @@ class RuntimeState:
 
     def mark_first_run_done(self) -> None:
         self.set("primeira_execucao_concluida", True)
+
+    # ------------------------------------------------------------- saudação
+
+    def segundos_desde_a_saudacao(self) -> float:
+        """Quanto tempo desde o último cumprimento. Infinito se nunca houve.
+
+        O watchdog reinicia o orquestrador quando ele cai. Sem esta marca, um
+        ciclo de queda faria o James cumprimentar a cada reinício — a cada 30
+        segundos, com a voz gastando cota a cada vez.
+        """
+        import time
+
+        # `time.time()` e não `monotonic`: o valor precisa sobreviver ao
+        # processo morrer, e o relógio monotônico zera junto com ele.
+        carimbo = self.get("ultima_saudacao_epoch")
+        if not isinstance(carimbo, (int, float)):
+            return float("inf")
+        return max(0.0, time.time() - float(carimbo))
+
+    def marcar_saudacao(self) -> None:
+        import time
+
+        self.set("ultima_saudacao_epoch", time.time())

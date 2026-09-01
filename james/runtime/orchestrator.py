@@ -47,8 +47,9 @@ from james.permissions.guard import Decision, Guard
 from james.security.pin import PinStore
 from james.security.sanitizer import sanitize_external
 from james.state.ipc import IpcClient
+from james.greeting import saudacao
 from james.state.runtime_state import RuntimeState
-from james.system_prompt import build_system_prompt, first_run_instruction, greeting_instruction
+from james.system_prompt import build_system_prompt
 from james.ui.bus import StateBus
 from james.tools import build_registry
 from james.ui import UiState, build_interface
@@ -128,7 +129,6 @@ class Orchestrator:
         self.tts = self._build_tts()
         self.player = None
         self.speaker = None
-        self._greeted = False
 
         self.llm = LLMClient(
             config=config,
@@ -240,6 +240,9 @@ class Orchestrator:
         self._publish_quota()
         app.aboutToQuit.connect(self.shutdown)
         logger.info("James pronto. Diga a palavra de ativação.")
+        # Numa thread: `_say` bloqueia até o áudio sair, e segurar a partida da
+        # interface por causa de um cumprimento deixaria a janela congelada.
+        threading.Thread(target=self._saudar, name="saudacao", daemon=True).start()
         return app.exec()
 
     def _on_tray_activated(self, reason) -> None:
@@ -872,20 +875,50 @@ class Orchestrator:
     def _turn_instruction(self) -> str | None:
         """Instrução extra a anexar ao primeiro turno, se houver.
 
-        A saudação viaja JUNTO com o comando, na mesma requisição, em vez de
-        virar uma chamada só para cumprimentar. Assim ela não custa requisição
-        nem atraso — que era exatamente o motivo de a pesquisa original querer
-        gerá-la "em paralelo" com a escuta.
+        Hoje nenhuma: a saudação virou fala de partida (`_saudar`). Ela ficava
+        aqui para não gastar uma requisição só para cumprimentar — mas uma
+        saudação que só sai DEPOIS de o usuário falar não é saudação, é
+        preâmbulo de resposta.
         """
-        if self._greeted:
-            return None
-        self._greeted = True
+        return None
 
-        if not self.runtime_state.first_run_done():
+    def _saudar(self) -> None:
+        """Cumprimenta ao subir, antes de qualquer comando.
+
+        Sem modelo: a frase é montada localmente (ver `james/greeting.py`).
+        Cumprimentar é hora do dia mais um nome, não raciocínio — e numa rede
+        de ~1.900 ms o James subiria e ficaria mudo alguns segundos esperando
+        uma resposta que ele mesmo sabe dar.
+        """
+        if self.speaker is None:
+            logger.info("Sem voz disponível; pulando a saudação.")
+            return
+
+        primeira = not self.runtime_state.first_run_done()
+
+        # O watchdog reinicia o orquestrador quando ele cai. Num ciclo de
+        # queda, sem esta janela, o James cumprimentaria a cada reinício — e
+        # cada "boa noite" custa caracteres da cota de voz.
+        if not primeira:
+            silencio = float(self.config.get("behavior.saudacao_intervalo_s", 900))
+            desde = self.runtime_state.segundos_desde_a_saudacao()
+            if desde < silencio:
+                logger.info(
+                    "Saudação omitida: cumprimentei há %.0fs (reinício recente).", desde
+                )
+                return
+
+        frase = saudacao(
+            tratamento=str(self.config.get("persona.tratamento", "senhor")),
+            nome=str(self.config.get("persona.nome", "James")),
+            primeira_vez=primeira,
+        )
+        if primeira:
             self.runtime_state.mark_first_run_done()
             audit("primeira_execucao")
-            return first_run_instruction()
-        return greeting_instruction()
+        self.runtime_state.marcar_saudacao()
+        audit("saudacao", primeira=primeira)
+        self._say(frase)
 
 
 def modos_para_ligar(config, da_linha: list[str], holograma: bool) -> list[str]:

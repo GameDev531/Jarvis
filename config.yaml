@@ -62,6 +62,10 @@ behavior:
   tts_tail_ms: 300            # margem após o fim do áudio antes de reabrir o mic
   max_tool_iterations: 5      # teto duro de ciclos de tool por tarefa
   history_turns: 12           # turnos mantidos no histórico enviado ao LLM
+  # Silêncio mínimo entre saudações. O watchdog reinicia o orquestrador quando
+  # ele cai; sem esta janela, um ciclo de queda faria o James cumprimentar a
+  # cada reinício — e cada 'boa noite' custa caracteres da cota de voz.
+  saudacao_intervalo_s: 900
 
 llm:
   # Divisão de trabalho entre os modelos. A ordem é a preferência: se o

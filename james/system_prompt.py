@@ -191,26 +191,7 @@ def build_system_prompt(config: Config, memory_snapshot: str = "") -> str:
     return prompt
 
 
-def greeting_instruction(moment: datetime | None = None) -> str:
-    """Instrução de saudação variável por horário.
-
-    Não é frase fixa de propósito: o modelo gera a saudação seguindo o tom do
-    período, então ela varia entre ativações em vez de virar um bordão.
-    """
-    now = moment or datetime.now()
-    tone = _GREETING_BY_PERIOD[period_of_day(now.hour)]
-    return (
-        f"Cumprimente o usuário em uma única frase curta. {tone} "
-        "Não faça perguntas de acompanhamento nem ofereça um menu de opções."
-    )
-
-
-def first_run_instruction() -> str:
-    """Apresentação única, na primeira ativação da vida da instalação."""
-    return (
-        "Esta é a primeira vez que você é ativado. Em no máximo quatro frases: "
-        "diga quem você é e para que serve, explique que basta chamá-lo pela "
-        "palavra de ativação, e avise que ações de risco sempre pedem "
-        "confirmação antes de executar. Termine perguntando como o usuário "
-        "prefere ser chamado."
-    )
+# As duas funções abaixo geravam a saudação pelo modelo. Não são mais usadas:
+# a saudação virou fala de partida, montada localmente em `james/greeting.py`.
+# Ficam removidas em vez de ficarem mortas aqui — um prompt que ninguém chama
+# é a próxima coisa a alguém "consertar" sem saber que não faz nada.
