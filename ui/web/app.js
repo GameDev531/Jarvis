@@ -489,7 +489,11 @@ class App {
     if (!canvas) return;
     try {
       const { createCoreScene } = await import('./core-scene.js');
-      this.core = createCoreScene(THREE, canvas, { governador: await this.governador() });
+      this.core = createCoreScene(THREE, canvas, {
+        governador: await this.governador(),
+        aoPerderContexto: () => this.log('Núcleo 3D suspenso — memória de vídeo.'),
+        aoRestaurarContexto: () => this.remontarNucleo(),
+      });
       this.log(`Motor volumétrico ativo · qualidade ${this.perf.nivel}`);
     } catch (err) {
       this.log('Falha ao montar o núcleo 3D.');
@@ -497,11 +501,35 @@ class App {
     }
   }
 
+  /* Contexto de volta: remontar, não só reexibir.
+   *
+   * Quando o contexto morre, tudo o que vivia na GPU vai junto — texturas,
+   * buffers, alvos de render — e o laço de desenho foi cancelado. Só tirar o
+   * canvas de `visibility:hidden` devolveria um retângulo parado.
+   *
+   * Um teto de tentativas porque a causa costuma ser falta de memória de
+   * vídeo: remontar sem parar, sob pressão, é receita para perder o contexto
+   * de novo em ciclo. Depois de três, a interface segue com o emblema em CSS,
+   * que não depende de GPU nenhuma.
+   */
+  async remontarNucleo() {
+    this._remontagens = (this._remontagens || 0) + 1;
+    if (this._remontagens > 3) {
+      this.log('Núcleo 3D desligado após várias quedas. O resto segue.');
+      return;
+    }
+    try { this.core?.dispose(); } catch { /* o contexto já se foi */ }
+    this.core = null;
+    this.$canvas.style.visibility = '';
+    await this.mountCore();
+  }
+
   async spawnHolo(k, canvas, subject) {
     try {
       const { createHoloScene } = await import('./holo-scene.js');
       this.holos[k] = createHoloScene(THREE, GLTFLoader, canvas, subject, this.mode, {
         governador: await this.governador(),
+        aoRestaurarContexto: () => this.renderWindows(),
         cache: './models',
         // Cada resolução conta de onde o objeto veio. É o que deixa visível,
         // no próprio log da interface, qual nível da cascata respondeu.

@@ -1,5 +1,7 @@
 """Memória curada: markdown editável à mão, com limite por caracteres."""
 
+from pathlib import Path
+
 import pytest
 
 from james.memory import MemoryScope, MemoryStore
@@ -9,6 +11,23 @@ from james.memory.curated_store import MemoryFull
 @pytest.fixture
 def store(tmp_path):
     return MemoryStore(tmp_path / "memories", max_chars=1000)
+
+
+@pytest.fixture
+def memory_registry(store):
+    """As ferramentas de memória de verdade, registradas como em produção.
+
+    Testar o `MemoryStore` sozinho não pegaria o defeito que motivou estes
+    testes: o problema não era o que se guarda, era o que se FALA ao guardar —
+    e isso mora na camada de ferramenta, não no armazenamento.
+    """
+    from james.config import Config
+    from james.tools.memory import register
+    from james.tools.registry import ToolRegistry
+
+    registry = ToolRegistry()
+    register(registry, Config({}), None, store)
+    return registry
 
 
 def test_arquivos_sao_criados_com_cabecalho(store, tmp_path):
@@ -164,3 +183,54 @@ def test_escopo_aceita_sinonimos_em_portugues():
     assert MemoryScope.parse("ambiente") is MemoryScope.MEMORY
     with pytest.raises(ValueError):
         MemoryScope.parse("inventado")
+
+
+# ----------------------------------------- guardar é interno, não é fala
+
+# Alguém ouviu o James anunciar, no meio de uma conversa sobre outra coisa,
+# que estava guardando algo na memória. O `ack` das ferramentas de escrita
+# virava fala: o assistente narrava a própria contabilidade.
+#
+# Ninguém diz em voz alta que está formando uma lembrança. A pessoa só
+# continua conversando.
+
+def _resultado_de(registry, nome, args):
+    return registry.execute(nome, args)
+
+
+def test_guardar_nao_fala(memory_registry):
+    """`ack` vazio é o que impede a narração — o orquestrador fala o `ack`
+    quando o modelo não disse nada."""
+    r = _resultado_de(memory_registry, "lembrar", {"texto": "café sem açúcar"})
+    assert r.ok
+    assert not r.ack, f"o James anunciaria: {r.ack!r}"
+    assert not r.speech
+
+
+def test_guardar_ainda_conta_ao_modelo(memory_registry):
+    """Silêncio é só para o alto-falante. O modelo PRECISA saber que deu certo,
+    senão tenta guardar de novo no turno seguinte."""
+    r = _resultado_de(memory_registry, "lembrar", {"texto": "prefere respostas curtas"})
+    assert r.data and r.data.get("resultado")
+
+
+def test_esquecer_tambem_e_interno(memory_registry):
+    r = _resultado_de(memory_registry, "esquecer", {"trecho": "inexistente"})
+    assert not r.ack and not r.speech
+
+
+def test_consultar_memoria_FALA(memory_registry):
+    """A exceção que confirma a regra: aqui o usuário PERGUNTOU. Calar seria
+    não responder."""
+    _resultado_de(memory_registry, "lembrar", {"texto": "toca violão"})
+    r = _resultado_de(memory_registry, "consultar_memoria", {"busca": "violão"})
+    assert r.speech, "perguntaram e o James ficou mudo"
+
+
+def test_a_regra_esta_no_prompt():
+    """Sem a regra escrita, o modelo narra por conta própria — o `ack` vazio
+    silencia a ferramenta, não o modelo."""
+    from james.system_prompt import build_system_prompt  # noqa: F401
+    import james.system_prompt as sp
+    fonte = Path(sp.__file__).read_text(encoding="utf-8")
+    assert "GUARDAR É INTERNO" in fonte

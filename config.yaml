@@ -151,11 +151,25 @@ llm:
 # estiver de pé assume. A troca é audível — você percebe pela voz qual motor
 # está falando.
 #
-#   [elevenlabs, piper]  nuvem, com o local de reserva  (padrão)
+#   [elevenlabs, lmnt, piper]  duas nuvens e o local  (padrão)
 #   [piper]              só local, tudo offline
 #   [elevenlabs]         só nuvem; ao acabar a cota, o James fica mudo
 voz:
-  cadeia: [elevenlabs, piper]
+  cadeia: [elevenlabs, lmnt, piper]
+
+  # Plano C. Sem ele, o dia em que a cota da ElevenLabs acaba é o dia em que a
+  # voz despenca para o Piper local de uma vez. A LMNT dá mais 15.000
+  # caracteres/mês numa conta separada, com contagem separada — a queda vira um
+  # degrau. Sem LMNT_API_KEY no .env, este motor simplesmente fica de fora.
+  lmnt:
+    voz: leah                # catálogo público da LMNT; troque pela que preferir
+    modelo: blizzard
+    idioma: pt
+    caracteres_por_mes: 15000
+    timeout_s: 30
+    # O caminho da API deles já mudou entre versões do SDK. Se der 404, é aqui
+    # que se ajusta — sem tocar em código.
+    endpoint: https://api.lmnt.com/v1/speech
 
   elevenlabs:
     # O plano grátis dá 10.000 caracteres POR MÊS. Como só a frase final é

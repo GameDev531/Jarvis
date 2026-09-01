@@ -47,7 +47,16 @@ def register(registry: ToolRegistry, config, guard, memory: MemoryStore) -> None
                 ),
                 data={"erro": str(exc)},
             )
-        return ToolResult(ok=True, ack=mensagem, data={"resultado": mensagem})
+        # SEM `ack`: guardar é interno.
+        #
+        # A mensagem do armazenamento ("Guardado.") virava fala, e o James
+        # anunciava a própria contabilidade — "guardei isso na memória" — no
+        # meio de uma conversa sobre outra coisa. Ninguém narra que está
+        # formando uma lembrança; a pessoa só continua conversando.
+        #
+        # `data` continua indo para o modelo: ele PRECISA saber que deu certo
+        # para não tentar de novo. O que sai é só a narração em voz alta.
+        return ToolResult(ok=True, data={"resultado": mensagem})
 
     def esquecer(args: dict) -> ToolResult:
         trecho = str(args.get("trecho", "")).strip()
@@ -57,9 +66,9 @@ def register(registry: ToolRegistry, config, guard, memory: MemoryStore) -> None
         for scope in MemoryScope:
             resultado = memory.remove(scope, trecho)
             if resultado == "Esquecido.":
-                return ToolResult(ok=True, ack=resultado, data={"resultado": resultado})
+                return ToolResult(ok=True, data={"resultado": resultado})
         return ToolResult(
-            ok=True, ack="Não encontrei isso na memória.", data={"resultado": "nao_encontrado"}
+            ok=True, data={"resultado": "nao_encontrado"}
         )
 
     def atualizar_memoria(args: dict) -> ToolResult:
@@ -73,9 +82,9 @@ def register(registry: ToolRegistry, config, guard, memory: MemoryStore) -> None
             except MemoryFull as exc:
                 return ToolResult.failure(str(exc))
             if resultado == "Atualizado.":
-                return ToolResult(ok=True, ack=resultado, data={"resultado": resultado})
+                return ToolResult(ok=True, data={"resultado": resultado})
         return ToolResult(
-            ok=True, ack="Não encontrei isso na memória.", data={"resultado": "nao_encontrado"}
+            ok=True, data={"resultado": "nao_encontrado"}
         )
 
     def consultar_memoria(args: dict) -> ToolResult:

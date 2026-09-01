@@ -191,6 +191,8 @@ def build_voice_chain(config, state_dir=None) -> VoiceChain:
     for nome in ordem:
         if nome == "elevenlabs":
             motor = _montar_elevenlabs(config, get_secret, Path(state_dir) if state_dir else None)
+        elif nome == "lmnt":
+            motor = _montar_lmnt(config, get_secret, Path(state_dir) if state_dir else None)
         elif nome == "piper":
             motor = _montar_piper(config)
         else:
@@ -236,6 +238,51 @@ def _montar_elevenlabs(config, get_secret, state_dir):
         dia_da_virada=int(secao.get("dia_da_virada", 1)),
     )
     return _Motor("elevenlabs", tts, orcamento)
+
+
+def _montar_lmnt(config, get_secret, state_dir):
+    """Plano C: mais 15.000 caracteres/mês, de outra conta e outra contagem.
+
+    Sem este degrau, o dia em que a cota da ElevenLabs acaba é o dia em que a
+    voz cai de uma vez para o Piper local. Cada motor tem o próprio orçamento
+    e o próprio arquivo de estado — somar as duas cotas num balde só faria uma
+    apagar a outra na virada do mês.
+    """
+    from james.voice.budget import CharacterBudget
+    from james.voice.lmnt_tts import (
+        CARACTERES_GRATIS_POR_MES_LMNT,
+        ENDPOINT_PADRAO,
+        MODELO_PADRAO,
+        VOZ_PADRAO,
+        LmntTTS,
+    )
+
+    chave = get_secret("LMNT_API_KEY")
+    if not chave:
+        logger.info("LMNT_API_KEY ausente — o plano C da voz fica de fora.")
+        return None
+
+    secao = config.section("voz.lmnt")
+    try:
+        tts = LmntTTS(
+            api_key=chave,
+            voice_id=str(secao.get("voz", "") or "").strip() or VOZ_PADRAO,
+            model_id=str(secao.get("modelo", "") or "").strip() or MODELO_PADRAO,
+            endpoint=str(secao.get("endpoint", "") or "").strip() or ENDPOINT_PADRAO,
+            timeout_s=float(secao.get("timeout_s", 30)),
+            idioma=str(secao.get("idioma", "pt")),
+        )
+    except TTSUnavailable as exc:
+        logger.warning("LMNT indisponível: %s", exc)
+        return None
+
+    orcamento = CharacterBudget(
+        limite_mensal=int(secao.get("caracteres_por_mes", CARACTERES_GRATIS_POR_MES_LMNT)),
+        # Arquivo próprio: a cota da LMNT não é a da ElevenLabs.
+        state_path=(state_dir / "voz_orcamento_lmnt.json") if state_dir else None,
+        dia_da_virada=int(secao.get("dia_da_virada", 1)),
+    )
+    return _Motor("lmnt", tts, orcamento)
 
 
 def _montar_piper(config):

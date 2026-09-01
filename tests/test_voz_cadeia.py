@@ -386,3 +386,73 @@ def test_prewarm_nao_gasta_cota(api, monkeypatch):
     """Aquecer a nuvem sintetizaria caracteres à toa."""
     assert _provedor(api, monkeypatch).prewarm() == 0.0
     assert api.pedidos == []
+
+
+# ------------------------------------------------------- LMNT (plano C)
+
+# Sem um terceiro degrau, o dia em que a cota da ElevenLabs acaba é o dia em
+# que a voz despenca para o Piper local de uma vez. A LMNT é outra conta, com
+# outra contagem — a queda vira degrau.
+
+from james.voice.lmnt_tts import CARACTERES_GRATIS_POR_MES_LMNT, LmntTTS
+
+
+def test_lmnt_fala_o_mesmo_formato_do_pipeline():
+    """16 kHz mono 16-bit: o mesmo do microfone, do VAD e do reprodutor.
+
+    O padrão da API é MP3. Aceitá-lo obrigaria a carregar um decodificador só
+    para desfazer a compressão — mais dependência, mais CPU, mais latência.
+    """
+    tts = LmntTTS(api_key="x")
+    assert tts.sample_rate == 16000
+
+
+def test_lmnt_sem_chave_e_recusado_na_montagem():
+    with pytest.raises(TTSUnavailable, match="LMNT_API_KEY"):
+        LmntTTS(api_key="")
+
+
+def test_cota_da_lmnt_e_separada_da_elevenlabs():
+    """Um balde só faria a virada do mês de uma apagar o crédito da outra."""
+    from james.voice.elevenlabs_tts import ElevenLabsTTS  # noqa: F401
+    from james.voice.budget import CARACTERES_GRATIS_POR_MES
+
+    assert CARACTERES_GRATIS_POR_MES_LMNT != CARACTERES_GRATIS_POR_MES
+
+
+def test_cadeia_de_tres_degraus_monta(monkeypatch):
+    """elevenlabs -> lmnt -> piper, sem nenhuma chave: monta e não levanta."""
+    from james.config import Config
+    from james.voice.chain import build_voice_chain
+
+    cadeia = build_voice_chain(
+        Config({"voz": {"cadeia": ["elevenlabs", "lmnt", "piper"]}})
+    )
+    assert cadeia is not None      # cadeia vazia é válida; explodir não é
+
+
+def test_lmnt_prewarm_nao_gasta_cota():
+    """Aquecer custaria caracteres reais, e a cota do mês é o recurso escasso."""
+    assert LmntTTS(api_key="x").prewarm() == 0.0
+
+
+def test_clonar_sem_chave_recusa():
+    from james.voice.lmnt_tts import clonar_voz
+    with pytest.raises(TTSUnavailable, match="LMNT_API_KEY"):
+        clonar_voz("", b"x" * 4096)
+
+
+def test_clonar_recusa_amostra_minuscula(tmp_path):
+    """Um arquivo de 3 bytes viraria uma voz inútil e gastaria a cota de
+    clones. Falhar aqui é mais barato que descobrir depois."""
+    from james.voice.lmnt_tts import clonar_voz
+    amostra = tmp_path / "curta.mp3"
+    amostra.write_bytes(b"\x00" * 10)
+    with pytest.raises(TTSUnavailable, match="pequena"):
+        clonar_voz("chave", amostra)
+
+
+def test_clonar_diz_quando_a_amostra_nao_existe(tmp_path):
+    from james.voice.lmnt_tts import clonar_voz
+    with pytest.raises(TTSUnavailable, match="não encontrada"):
+        clonar_voz("chave", tmp_path / "nao-existe.mp3")

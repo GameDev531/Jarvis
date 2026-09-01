@@ -535,3 +535,32 @@ def test_ninguem_le_clientWidth_dentro_do_laco():
         assert "clientWidth" not in _sem_comentarios(fonte), (
             f"{nome} ainda lê clientWidth em código"
         )
+
+
+def test_perda_de_contexto_webgl_e_tratada():
+    """O bug do retângulo branco no meio da interface.
+
+    O navegador mata contextos WebGL quando falta memória de vídeo, e há um
+    por cena: o núcleo mais cada janela holográfica. Sem tratamento, o
+    Chromium desenha o canvas morto como um retângulo BRANCO com ícone de
+    imagem quebrada — e ele fica assim para sempre.
+
+    `preventDefault()` não é detalhe de estilo: sem ele o navegador nunca
+    dispara `webglcontextrestored`, e não existe volta.
+    """
+    for nome in CENAS:
+        fonte = (WEB / nome).read_text(encoding="utf-8")
+        assert "webglcontextlost" in fonte, f"{nome} não trata perda de contexto"
+        assert "webglcontextrestored" in fonte, f"{nome} não trata a volta"
+        codigo = _sem_comentarios(fonte)
+        assert "preventDefault()" in codigo, (
+            f"{nome}: sem preventDefault o contexto nunca volta"
+        )
+
+
+def test_contexto_restaurado_remonta_a_cena():
+    """Reexibir o canvas não basta: tudo o que vivia na GPU foi embora e o
+    laço de desenho foi cancelado. Sem remontar, volta um retângulo parado."""
+    app = (WEB / "app.js").read_text(encoding="utf-8")
+    assert "aoRestaurarContexto" in app
+    assert "remontarNucleo" in app

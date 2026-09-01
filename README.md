@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 18 implementadas. 896 testes automatizados.
+**Estado atual:** Fases 0 a 18 implementadas. 911 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -66,6 +66,7 @@ copy .env.example .env
 | `OPENROUTER_API_KEY` | [openrouter.ai/keys](https://openrouter.ai/keys) | pensar e agir |
 | `PORCUPINE_ACCESS_KEY` | [console.picovoice.ai](https://console.picovoice.ai) | palavra de ativação — **opcional**, veja abaixo |
 | `ELEVENLABS_API_KEY` | [elevenlabs.io](https://elevenlabs.io) | voz na nuvem (opcional) |
+| `LMNT_API_KEY` | [app.lmnt.com](https://app.lmnt.com) | voz na nuvem, plano C (opcional) |
 
 O `.env` está no `.gitignore`. Nunca comite ele.
 
@@ -174,6 +175,42 @@ cache; depois disso funciona sem rede. O código dele é Apache 2.0,
 mas os **modelos pré-treinados são CC-BY-NC-SA 4.0** (uso não comercial) —
 para um assistente pessoal está tudo certo; se um dia isto virar produto, será
 preciso treinar modelos próprios, o que o projeto suporta.
+
+### A voz tem três degraus
+
+```yaml
+voz:
+  cadeia: [elevenlabs, lmnt, piper]
+```
+
+| Motor | Cota | Onde roda |
+|---|---|---|
+| ElevenLabs | 10.000 caracteres/mês | nuvem |
+| LMNT | 15.000 caracteres/mês | nuvem, **outra conta** |
+| Piper | ilimitada | local |
+
+Sem o degrau do meio, o dia em que a cota da ElevenLabs acaba é o dia em que a
+voz despenca para o local de uma vez. Cada motor tem orçamento e arquivo de
+estado próprios — somar as duas cotas num balde só faria a virada do mês de uma
+apagar o crédito da outra.
+
+**A voz precisa ser a mesma nos três.** Trocar de motor com timbres diferentes
+faz o James virar outra pessoa no meio da conversa, e isso soa como defeito,
+não como economia. ElevenLabs e LMNT clonam: alimente as duas com a mesma
+amostra e a troca fica quase imperceptível.
+
+```bash
+python clonar_voz.py minha-amostra.mp3
+```
+
+Ele imprime o `voice id` para colar em `voz.lmnt.voz`. Depois clone a mesma
+amostra na ElevenLabs e aponte `voz.elevenlabs.voice_id` para ela. O Piper não
+clona — ali a troca é audível de qualquer jeito, e é o preço de continuar
+falando de graça e sem internet.
+
+Use material que você tenha o direito de usar: clonar a voz de outra pessoa
+sem consentimento viola os termos dos dois serviços, e o custo prático é a
+conta suspensa.
 
 ### São duas interfaces, e a holográfica não sobe sozinha
 
@@ -916,7 +953,7 @@ por voz sai **uma vez**, não a cada turno.
 ## Testes
 
 ```bash
-python -m pytest tests/ -q          # 896 testes
+python -m pytest tests/ -q          # 911 testes
 ```
 
 | Arquivo | O que cobre |
@@ -968,6 +1005,7 @@ python -m pytest tests/ -q          # 896 testes
 ```
 check_hardware.py     Fase 0
 check_modelos.py      confere os modelos do OpenRouter contra o catálogo vivo
+clonar_voz.py         cria a voz na LMNT a partir de uma amostra
 wake_listener.py      processo 1 (o que você inicia)
 main.py               processo 2 (iniciado pelo processo 1)
 set_pin.py            PIN de confirmação

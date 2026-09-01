@@ -27,6 +27,22 @@ export function createHoloScene(T, GLTFLoader, canvas, assunto, modo = 'jarvis',
 
   const ritmo = governador.criarRitmo();
 
+  /* Ver o comentário longo em core-scene.js. Aqui o risco é maior: cada janela
+     aberta é mais um contexto, e são elas que o navegador mata primeiro. */
+  const aoPerderContexto = (evento) => {
+    evento.preventDefault();
+    cancelAnimationFrame(raf);
+    canvas.style.visibility = 'hidden';
+    console.warn('[james] Contexto WebGL de uma janela perdido.');
+    opcoes.aoPerderContexto?.();
+  };
+  const aoVoltarContexto = () => {
+    canvas.style.visibility = '';
+    opcoes.aoRestaurarContexto?.();
+  };
+  canvas.addEventListener('webglcontextlost', aoPerderContexto, false);
+  canvas.addEventListener('webglcontextrestored', aoVoltarContexto, false);
+
   const cena = new T.Scene();
   const camera = new T.PerspectiveCamera(42, 1, 0.1, 100);
   const suporte = new T.Group();
@@ -161,6 +177,8 @@ export function createHoloScene(T, GLTFLoader, canvas, assunto, modo = 'jarvis',
       window.removeEventListener('pointerup', aoSoltar);
       canvas.removeEventListener('wheel', aoRodar);
       pararTamanho();
+      canvas.removeEventListener('webglcontextlost', aoPerderContexto);
+      canvas.removeEventListener('webglcontextrestored', aoVoltarContexto);
       pararVisibilidade();
       limpar();
       material.dispose();

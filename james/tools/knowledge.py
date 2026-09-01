@@ -48,8 +48,10 @@ def register_facts(registry: ToolRegistry, config, guard, facts: FactStore) -> N
 
         if fato is None:
             # Duplicata: o fato já existia e ganhou confiança.
-            return ToolResult(ok=True, ack="Isso eu já sabia.", data={"duplicata": True})
-        return ToolResult(ok=True, ack="Anotado.", data=fato.to_dict())
+            # Sem `ack`: anotar é interno, como em `lembrar`. Ver o
+            # comentário longo em tools/memory.py.
+            return ToolResult(ok=True, data={"duplicata": True})
+        return ToolResult(ok=True, data=fato.to_dict())
 
     def consultar_fatos(args: dict) -> ToolResult:
         modo = str(args.get("modo", "busca")).strip().lower()
@@ -119,14 +121,13 @@ def register_facts(registry: ToolRegistry, config, guard, facts: FactStore) -> N
         if acao == "remover":
             if not facts.remove(fato_id):
                 return ToolResult.failure("Não encontrei esse fato.")
-            return ToolResult(ok=True, ack="Removido.", data={"id": fato_id})
+            return ToolResult(ok=True, data={"id": fato_id})
 
         nova = facts.confirm(fato_id) if acao == "confirmar" else facts.refute(fato_id)
         if nova is None:
             return ToolResult.failure("Não encontrei esse fato.")
         return ToolResult(
             ok=True,
-            ack="Anotado." if acao == "confirmar" else "Vou considerar isso duvidoso.",
             data={"id": fato_id, "confianca": round(nova, 2)},
         )
 

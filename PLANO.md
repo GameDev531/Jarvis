@@ -32,7 +32,7 @@ descreve por que as coisas são como são e o que falta.
 | 19 — Wake word "James" própria | ⬜ | Treino do modelo pelo openWakeWord |
 | 20 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
 
-**896 testes automatizados.** Piper, whisper.cpp, Qt e câmera continuam sem
+**911 testes automatizados.** Piper, whisper.cpp, Qt e câmera continuam sem
 execução em hardware real — a Fase 0 existe para isso. O openWakeWord é a
 exceção: o motor foi carregado de verdade neste ambiente (modelo `hey_jarvis`,
 ~14 MB baixados, 2,4% de um núcleo em escuta contínua num processador

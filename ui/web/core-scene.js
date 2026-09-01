@@ -22,6 +22,35 @@ export function createCoreScene(T, canvas, opcoes = {}) {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, governador.perfil.dpr));
   renderer.autoClear = false;
   const ritmo = governador.criarRitmo();
+
+  /* Perda de contexto WebGL.
+   *
+   * O navegador mata contextos quando falta memória de vídeo — e aqui há um
+   * por cena: o núcleo mais cada janela holográfica aberta. Numa máquina
+   * modesta com outras abas pesadas, isso acontece de verdade.
+   *
+   * Sem tratamento, o Chromium desenha o canvas morto como um RETÂNGULO
+   * BRANCO com ícone de imagem quebrada, e ele fica assim para sempre. Foi
+   * exatamente o que apareceu no meio da interface.
+   *
+   * `preventDefault()` é obrigatório e não é detalhe: sem ele o navegador
+   * nunca dispara `webglcontextrestored`, e não há como voltar. */
+  const aoPerderContexto = (evento) => {
+    evento.preventDefault();
+    cancelAnimationFrame(raf);
+    // Esconder o canvas evita o retângulo branco. O emblema em CSS que fica
+    // atrás continua desenhando — a interface degrada em vez de quebrar.
+    canvas.style.visibility = 'hidden';
+    console.warn('[james] Contexto WebGL do núcleo perdido.');
+    opcoes.aoPerderContexto?.();
+  };
+  const aoVoltarContexto = () => {
+    canvas.style.visibility = '';
+    console.info('[james] Contexto WebGL restaurado.');
+    opcoes.aoRestaurarContexto?.();
+  };
+  canvas.addEventListener('webglcontextlost', aoPerderContexto, false);
+  canvas.addEventListener('webglcontextrestored', aoVoltarContexto, false);
   const scene = new T.Scene();
   const camera = new T.PerspectiveCamera(38, 1, 0.1, 200);
   const root = new T.Group();
@@ -323,6 +352,8 @@ export function createCoreScene(T, canvas, opcoes = {}) {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       pararDeObservar();
+      canvas.removeEventListener('webglcontextlost', aoPerderContexto);
+      canvas.removeEventListener('webglcontextrestored', aoVoltarContexto);
       scene.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
       [rtScene, rtA, rtB].forEach(r => r.dispose());
       renderer.dispose();
