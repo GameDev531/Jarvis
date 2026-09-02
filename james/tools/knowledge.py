@@ -27,6 +27,11 @@ logger = get_logger("james.tools.knowledge")
 _ACOES_REVISAO = ("confirmar", "refutar", "remover")
 
 
+# Abaixo desta confiança, as arestas que o fato criou deixam de valer. 0.3 é
+# onde uma refutação já pesa mais que a afirmação original.
+_CONFIANCA_MINIMA_PARA_ARESTA = 0.3
+
+
 def register_facts(registry: ToolRegistry, config, guard, facts: FactStore) -> None:
     def registrar_fato(args: dict) -> ToolResult:
         texto = str(args.get("texto", "")).strip()
@@ -126,9 +131,71 @@ def register_facts(registry: ToolRegistry, config, guard, facts: FactStore) -> N
         nova = facts.confirm(fato_id) if acao == "confirmar" else facts.refute(fato_id)
         if nova is None:
             return ToolResult.failure("Não encontrei esse fato.")
+
+        derrubadas = 0
+        if acao == "refutar" and nova <= _CONFIANCA_MINIMA_PARA_ARESTA:
+            # O fato continua na tabela, com confiança baixa — mas as arestas
+            # que ele criou não podem continuar sustentando conclusões. Sem
+            # isto, "João trabalha na Acme" seria refutado e o caminho
+            # "João -> São Paulo" continuaria de pé, apoiado num fato que o
+            # próprio usuário já disse que é falso.
+            derrubadas = facts.esquecer_relacoes_do_fato(fato_id)
+            if derrubadas:
+                audit("relacoes_derrubadas", fato=fato_id, quantidade=derrubadas)
+
         return ToolResult(
             ok=True,
-            data={"id": fato_id, "confianca": round(nova, 2)},
+            data={"id": fato_id, "confianca": round(nova, 2), "relacoes_removidas": derrubadas},
+        )
+
+    # ------------------------------------------------------------- o grafo
+
+    def relacionar(args: dict) -> ToolResult:
+        origem = str(args.get("origem", "")).strip()
+        tipo = str(args.get("relacao", "")).strip()
+        destino = str(args.get("destino", "")).strip()
+        if not origem or not tipo or not destino:
+            return ToolResult.failure("Preciso de origem, relação e destino.")
+
+        fato_id = args.get("fato_id")
+        try:
+            fato_id = int(fato_id) if fato_id is not None else None
+        except (TypeError, ValueError):
+            fato_id = None
+
+        criada = facts.relacionar(origem, tipo, destino, fato_id=fato_id)
+        if criada:
+            audit("relacao_criada", origem=origem, tipo=tipo, destino=destino)
+        # Sem `ack`: ligar duas coisas na memória é interno, como guardar.
+        return ToolResult(ok=True, data={"criada": criada, "ja_existia": not criada})
+
+    def como_se_conectam(args: dict) -> ToolResult:
+        origem = str(args.get("origem", "")).strip()
+        destino = str(args.get("destino", "")).strip()
+        if not origem or not destino:
+            return ToolResult.failure("Preciso dos dois nomes.")
+
+        caminho = facts.caminho(origem, destino)
+        if caminho is None:
+            return ToolResult(
+                ok=True,
+                speech=f"Não encontrei ligação entre {origem} e {destino}.",
+                data={"caminho": None},
+            )
+        if not caminho:
+            return ToolResult(ok=True, speech=f"{origem} e {destino} são a mesma coisa.",
+                              data={"caminho": []})
+
+        # A frase é montada aqui e não pelo modelo: o caminho é um fato
+        # derivado, e deixar o modelo reescrevê-lo é onde ele inventa um salto
+        # que o grafo não tem.
+        partes = [f"{caminho[0]['de']}"]
+        for salto in caminho:
+            partes.append(f"{salto['tipo']} {salto['para']}")
+        return ToolResult(
+            ok=True,
+            speech=", ".join(partes) + ".",
+            data={"caminho": caminho, "saltos": len(caminho)},
         )
 
     registry.register(
@@ -204,6 +271,68 @@ def register_facts(registry: ToolRegistry, config, guard, facts: FactStore) -> N
             },
             handler=revisar_fato,
             fire_and_forget=True,
+        )
+    )
+
+    registry.register(
+        Tool(
+            name="relacionar",
+            description=(
+                "Liga duas coisas na memória com uma relação nomeada, formando "
+                "um grafo. Use depois de registrar um fato que conecta duas "
+                "entidades: 'João trabalha na Acme' vira relacionar('João', "
+                "'trabalha em', 'Acme'). É isso que depois permite descobrir "
+                "que João está em São Paulo, se a Acme fica lá."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "origem": {"type": "string", "description": "De quem parte a relação."},
+                    "relacao": {
+                        "type": "string",
+                        "description": "Como se relacionam: 'trabalha em', 'é irmã de'.",
+                    },
+                    "destino": {"type": "string", "description": "Para quem aponta."},
+                    "fato_id": {
+                        "type": "integer",
+                        "description": (
+                            "Número do fato que afirmou isto, se houver. Ligar a "
+                            "relação ao fato faz ela cair junto quando o fato é "
+                            "refutado."
+                        ),
+                    },
+                },
+                "required": ["origem", "relacao", "destino"],
+            },
+            handler=relacionar,
+            fire_and_forget=True,
+        )
+    )
+
+    registry.register(
+        Tool(
+            name="como_se_conectam",
+            description=(
+                "Descobre o caminho entre duas coisas na memória, atravessando "
+                "as relações. Responde perguntas que nenhuma busca por texto "
+                "responde, porque a ligação está espalhada em vários fatos."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "origem": {
+                        "type": "string",
+                        "description": "De onde partir na busca. Uma pessoa, lugar ou coisa.",
+                    },
+                    "destino": {
+                        "type": "string",
+                        "description": "Onde se quer chegar.",
+                    },
+                },
+                "required": ["origem", "destino"],
+            },
+            handler=como_se_conectam,
+            fire_and_forget=False,
         )
     )
 

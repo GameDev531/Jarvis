@@ -230,7 +230,9 @@ def test_a_fronteira_do_barramento_e_a_do_protocolo():
     não virarem duas."""
     from james.ui.bus import CHAVES_EFEMERAS
 
-    assert CHAVES_EFEMERAS == {"log", "transcricao", "resposta"}
+    # `turno` entrou depois, quando o orquestrador passou a marcar o início e
+    # o fim explicitamente — e é acontecimento como os outros três.
+    assert CHAVES_EFEMERAS == {"log", "transcricao", "resposta", "turno"}
 
 
 def _coletar(fluxo) -> list[dict]:
@@ -344,3 +346,74 @@ def test_a_decisao_do_guard_vai_como_custom_nomeado():
     custom = [e for e in _coletar(f) if e["type"] == "CUSTOM"][0]
     assert custom["name"] == "jarvis.guard.decision"
     assert custom["value"]["decision"] == "confirm"
+
+
+# ----------------------------------- a marca explícita de turno (Fase 21)
+
+# A heurística "voltou para PRONTO, então acabou" funcionava e tinha uma
+# armadilha real: o James também está PRONTO quando ninguém pediu nada, e o
+# estado pode passar por PRONTO no meio de um turno. Agora o orquestrador diz
+# onde o turno começa e acaba, publicando `turno="inicio"` / `turno="fim"` — o
+# segundo num `finally`, para que um turno que estoura feche o run do mesmo
+# jeito.
+
+
+def _com_marca(passos, snapshot_inicial="PRONTO"):
+    f = FluxoDeRun("t")
+    f.iniciar()
+    a = AdaptadorDeEstado(f)
+    a.snapshot({"estado": snapshot_inicial})
+    for passo in passos:
+        a.publicar(passo)
+    return f
+
+
+def test_turno_fim_fecha_o_run():
+    f = _com_marca([{"turno": "inicio"}, {"estado": "PENSANDO"}, {"turno": "fim"}])
+    assert f.sequencia.terminou
+
+
+def test_pronto_no_meio_do_turno_nao_fecha():
+    """O ponto da mudança. Com a heurística sozinha, um `estado=PRONTO`
+    passageiro fecharia o run antes de a resposta sair."""
+    f = _com_marca([{"turno": "inicio"}, {"estado": "PRONTO"}, {"estado": "PENSANDO"}])
+    assert not f.sequencia.terminou
+
+
+def test_a_marca_desliga_o_palpite():
+    """Deixar os dois ativos seria pior que só o palpite: a presença da marca
+    já prova que quem publica sabe o que está fazendo."""
+    f = FluxoDeRun("t")
+    f.iniciar()
+    a = AdaptadorDeEstado(f)
+    a.snapshot({"estado": "PRONTO"})
+    a.publicar({"turno": "inicio"})
+    assert a._explicito is True
+
+
+def test_a_heuristica_continua_valendo_sem_a_marca():
+    """Reserva para quem publica sem ser o orquestrador — um teste, uma
+    ferramenta isolada. Tirar a heurística deixaria esses casos pendurados."""
+    f = _com_marca([{"estado": "PENSANDO"}, {"estado": "PRONTO"}])
+    assert f.sequencia.terminou
+
+
+def test_turno_e_efemero_e_nao_vira_estado():
+    """`turno` é acontecimento. Guardá-lo no instantâneo faria uma aba que
+    recarrega ver "fim" e fechar o run recém-aberto."""
+    from james.ui.bus import CHAVES_EFEMERAS
+
+    assert "turno" in CHAVES_EFEMERAS
+
+
+def test_o_orquestrador_fecha_o_turno_no_finally():
+    """Um turno que estoura precisa fechar o run do mesmo jeito, senão a tela
+    fica girando esperando um fim que a exceção levou embora."""
+    from pathlib import Path
+
+    fonte = (Path(__file__).resolve().parent.parent
+             / "james" / "runtime" / "orchestrator.py").read_text(encoding="utf-8")
+    depois_do_finally = fonte.split("finally:")
+    assert any('turno="fim"' in trecho for trecho in depois_do_finally[1:]), (
+        "a marca de fim precisa estar num finally"
+    )

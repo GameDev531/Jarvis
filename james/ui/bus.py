@@ -37,7 +37,7 @@ _TAMANHO_DA_FILA = 64
 # cada recarga. Virou constante quando o adaptador AG-UI passou a precisar da
 # MESMA fronteira — duas listas iguais em arquivos diferentes é uma lista
 # desatualizada esperando acontecer.
-CHAVES_EFEMERAS = frozenset({"log", "transcricao", "resposta"})
+CHAVES_EFEMERAS = frozenset({"log", "transcricao", "resposta", "turno"})
 
 
 class Subscriber:

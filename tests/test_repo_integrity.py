@@ -20,6 +20,7 @@ não faz sentido e falhar seria ruído.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -31,7 +32,7 @@ RAIZ = Path(__file__).resolve().parent.parent
 # holográfica é servida de lá em runtime: um arquivo faltando ali quebra a tela
 # sem quebrar teste nenhum.
 PASTAS_DE_FONTE = ("james", "tests", "ui")
-EXTENSOES = (".py", ".js", ".html", ".css")
+EXTENSOES = (".py", ".js", ".mjs", ".html", ".css")
 IGNORAR_NO_CAMINHO = ("__pycache__", "/vendor/", "/design/", ".egg-info")
 
 
@@ -159,11 +160,36 @@ def test_interface_web_esta_completa():
         "ui/web/holo-material.js",
         "ui/web/holo-catalog.js",
         "ui/web/holo-resolver.js",
+        "ui/web/perf.js",
+        "ui/web/despertar.js",
         "ui/web/vendor/three.module.js",
         "ui/web/vendor/GLTFLoader.js",
     ]
     faltando = [e for e in essenciais if e not in rastreados]
     assert not faltando, f"arquivos da interface fora do git: {faltando}"
+
+
+def test_todo_modulo_carregado_sob_demanda_esta_no_git():
+    """A lista acima é escrita à mão, e listas escritas à mão atrasam.
+
+    Os módulos pesados da interface entram por `await import('./x.js')`, o que
+    significa que o arquivo é buscado do servidor **na hora em que a pessoa usa
+    o recurso** — não no carregamento. Um deles fora do git não aparece na tela
+    preta do primeiro segundo: aparece quando alguém aperta ATIVAR ULTRON, três
+    dias depois, e nada acontece. Este teste lê os imports do próprio `app.js`,
+    então um módulo novo já nasce coberto.
+    """
+    rastreados = set(_git("ls-files").splitlines())
+    app = (RAIZ / "ui" / "web" / "app.js").read_text(encoding="utf-8")
+
+    alvos = re.findall(r"""import\(\s*['"]\./([\w.-]+)['"]\s*\)""", app)
+    assert alvos, "nenhum import dinâmico encontrado — o padrão do regex mudou?"
+
+    faltando = [a for a in alvos if f"ui/web/{a}" not in rastreados]
+    assert not faltando, (
+        f"módulos importados sob demanda e fora do git: {faltando} — "
+        "a interface só quebra quando a pessoa usar o recurso"
+    )
 
 
 # ------------------------------------------------- o .gitignore em si

@@ -34,10 +34,11 @@ descreve por que as coisas são como são e o que falta.
 | 21 — Central de agentes (interface) | ⬜ | Painéis, canais, supervisor — sobre a camada acima |
 | 22 — Wake word "James" própria | ⬜ | Treino do modelo pelo openWakeWord |
 | 23 — Mapa-múndi holográfico | ⬜ | Zoom até o local real, botão para tirar o shader |
-| 24 — Partida cinematográfica do Ultron | ⬜ | Sequência de despertar na interface |
-| 25 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
+| 24 — Partida cinematográfica do Ultron | ✅ | Roteiro em tabela, pulável, respeita `prefers-reduced-motion` |
+| 25 — Grafo de memória | ✅ | Arestas tipadas com procedência, travessia em largura, refutação desfaz |
+| 26 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
 
-**1031 testes automatizados.** Piper, whisper.cpp, Qt e câmera continuam sem
+**1056 testes automatizados.** Piper, whisper.cpp, Qt e câmera continuam sem
 execução em hardware real — a Fase 0 existe para isso. O openWakeWord é a
 exceção: o motor foi carregado de verdade neste ambiente (modelo `hey_jarvis`,
 ~14 MB baixados, 2,4% de um núcleo em escuta contínua num processador

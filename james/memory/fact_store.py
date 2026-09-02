@@ -76,8 +76,30 @@ CREATE TABLE IF NOT EXISTS fato_entidade (
     PRIMARY KEY (fato_id, entidade_id)
 );
 
+-- ARESTAS DO GRAFO. O que `fato_entidade` já dava era co-ocorrência: "estes
+-- dois aparecem no mesmo fato". Isso não diz COMO se relacionam, e não dá para
+-- percorrer: de "João" chega-se a "empresa X", mas não se sabe se ele trabalha
+-- lá, comprou de lá ou reclamou dela.
+--
+-- Aresta tipada e dirigida resolve as duas coisas. E `fato_id` não é enfeite —
+-- é a PROCEDÊNCIA: toda aresta aponta para o fato que a afirmou. Sem isso, o
+-- grafo vira um amontoado de afirmações sem dono, e refutar um fato deixaria
+-- de pé a aresta que ele criou.
+CREATE TABLE IF NOT EXISTS relacoes (
+    id         INTEGER PRIMARY KEY,
+    origem_id  INTEGER NOT NULL REFERENCES entidades(id) ON DELETE CASCADE,
+    destino_id INTEGER NOT NULL REFERENCES entidades(id) ON DELETE CASCADE,
+    tipo       TEXT    NOT NULL,          -- normalizado: "trabalha em"
+    rotulo     TEXT    NOT NULL,          -- como foi dito, para exibir
+    fato_id    INTEGER REFERENCES fatos(id) ON DELETE CASCADE,
+    criado_em  TEXT    NOT NULL,
+    UNIQUE (origem_id, destino_id, tipo)
+);
+
 CREATE INDEX IF NOT EXISTS idx_fe_entidade ON fato_entidade(entidade_id);
 CREATE INDEX IF NOT EXISTS idx_fatos_chave ON fatos(chave);
+CREATE INDEX IF NOT EXISTS idx_rel_origem ON relacoes(origem_id);
+CREATE INDEX IF NOT EXISTS idx_rel_destino ON relacoes(destino_id);
 """
 
 # `content=` liga a tabela virtual à real: o texto não é duplicado, os gatilhos
@@ -183,6 +205,17 @@ class FactStore:
                     (normalize_text(linha["texto"]), linha["id"]),
                 )
             logger.info("Banco de fatos migrado: coluna de chave normalizada criada.")
+
+        # A tabela de relações nasceu depois. `CREATE TABLE IF NOT EXISTS` no
+        # esquema já a cria em banco novo; aqui só se registra a migração para
+        # quem já tinha banco, porque o silêncio faria parecer que o grafo
+        # sempre existiu.
+        tabelas = {
+            linha["name"]
+            for linha in con.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        if "relacoes" not in tabelas:
+            logger.info("Banco de fatos migrado: grafo de relações criado.")
 
     def close(self) -> None:
         with self._lock:
@@ -377,6 +410,173 @@ class FactStore:
                 (chave, chave, int(limite)),
             ).fetchall()
             return [(linha["rotulo"], int(linha["n"])) for linha in linhas]
+
+    # --------------------------------------------------------------- grafo
+
+    def relacionar(
+        self,
+        origem: str,
+        tipo: str,
+        destino: str,
+        fato_id: int | None = None,
+    ) -> bool:
+        """Cria uma aresta dirigida entre duas entidades.
+
+        `fato_id` é a procedência: qual fato afirmou isto. Guardar essa ligação
+        é o que separa um grafo de conhecimento de um grafo qualquer — sem ela,
+        refutar o fato deixaria a aresta de pé, e o James continuaria
+        raciocinando sobre algo que ele já sabe que é falso.
+
+        Devolve `False` quando a aresta já existia: repetir não é erro, e
+        insistir em levantar exceção faria o modelo tratar redundância como
+        falha.
+        """
+        origem, destino = _limpar(origem), _limpar(destino)
+        tipo_limpo = _limpar(tipo)
+        if not origem or not destino or not tipo_limpo:
+            return False
+        if normalize_text(origem) == normalize_text(destino):
+            # Aresta de uma entidade para ela mesma não acrescenta caminho e
+            # ainda faz a travessia andar em círculo.
+            return False
+
+        with self._lock:
+            con = self._connect()
+            with con:
+                oid = self._entidade_id(con, origem)
+                did = self._entidade_id(con, destino)
+                cursor = con.execute(
+                    "INSERT OR IGNORE INTO relacoes "
+                    "(origem_id, destino_id, tipo, rotulo, fato_id, criado_em) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (oid, did, normalize_text(tipo_limpo), tipo_limpo,
+                     fato_id, datetime.now(timezone.utc).isoformat(timespec="seconds")),
+                )
+                return cursor.rowcount > 0
+
+    def _entidade_id(self, con: sqlite3.Connection, nome: str) -> int:
+        chave = normalize_text(nome)
+        con.execute(
+            "INSERT OR IGNORE INTO entidades (chave, rotulo) VALUES (?, ?)",
+            (chave, nome),
+        )
+        linha = con.execute(
+            "SELECT id FROM entidades WHERE chave = ?", (chave,)
+        ).fetchone()
+        return int(linha["id"])
+
+    def relacoes_de(self, entidade: str, limite: int = 20) -> list[dict[str, Any]]:
+        """Arestas que saem OU chegam nesta entidade.
+
+        As duas direções porque quem pergunta "o que você sabe sobre João" quer
+        tanto "João trabalha na X" quanto "Maria é irmã de João".
+        """
+        chave = normalize_text(entidade)
+        if not chave:
+            return []
+        with self._lock:
+            con = self._connect()
+            linhas = con.execute(
+                "SELECT eo.rotulo AS origem, r.rotulo AS tipo, ed.rotulo AS destino, "
+                "       r.fato_id AS fato_id, "
+                "       CASE WHEN eo.chave = ? THEN 'saindo' ELSE 'chegando' END AS sentido "
+                "FROM relacoes r "
+                "JOIN entidades eo ON eo.id = r.origem_id "
+                "JOIN entidades ed ON ed.id = r.destino_id "
+                "WHERE eo.chave = ? OR ed.chave = ? "
+                "ORDER BY r.id DESC LIMIT ?",
+                (chave, chave, chave, int(limite)),
+            ).fetchall()
+            return [dict(linha) for linha in linhas]
+
+    def caminho(
+        self, origem: str, destino: str, max_saltos: int = 4
+    ) -> list[dict[str, str]] | None:
+        """O caminho mais curto entre duas entidades, ou `None`.
+
+        É isto que uma lista de fatos não consegue fazer. "João trabalha na
+        empresa X" e "a empresa X fica em São Paulo" são dois fatos separados;
+        nenhuma busca textual por "João" e "São Paulo" liga os dois. Percorrer
+        as arestas liga.
+
+        Busca em largura, não em profundidade: o caminho mais curto é o mais
+        confiável, porque cada salto é uma chance de a inferência escorregar.
+
+        `max_saltos` existe porque a partir de uns quatro saltos a conclusão
+        deixa de ser conhecimento e vira jogo de seis graus de separação.
+        """
+        chave_origem, chave_destino = normalize_text(origem), normalize_text(destino)
+        if not chave_origem or not chave_destino:
+            return None
+        if chave_origem == chave_destino:
+            return []
+
+        with self._lock:
+            con = self._connect()
+            # Fila da largura: (chave atual, caminho até aqui)
+            fila: list[tuple[str, list[dict[str, str]]]] = [(chave_origem, [])]
+            vistos = {chave_origem}
+
+            while fila:
+                atual, caminho = fila.pop(0)
+                if len(caminho) >= max_saltos:
+                    continue
+
+                linhas = con.execute(
+                    # As duas direções: a relação "é irmã de" vale nos dois
+                    # sentidos para efeito de caminho, mesmo sendo dirigida.
+                    "SELECT eo.chave AS ck_o, eo.rotulo AS ro, r.rotulo AS tipo, "
+                    "       ed.chave AS ck_d, ed.rotulo AS rd "
+                    "FROM relacoes r "
+                    "JOIN entidades eo ON eo.id = r.origem_id "
+                    "JOIN entidades ed ON ed.id = r.destino_id "
+                    "WHERE eo.chave = ? OR ed.chave = ?",
+                    (atual, atual),
+                ).fetchall()
+
+                for linha in linhas:
+                    saindo = linha["ck_o"] == atual
+                    proxima = linha["ck_d"] if saindo else linha["ck_o"]
+                    if proxima in vistos:
+                        continue
+                    salto = {
+                        "de": linha["ro"] if saindo else linha["rd"],
+                        "tipo": linha["tipo"],
+                        "para": linha["rd"] if saindo else linha["ro"],
+                        "sentido": "direto" if saindo else "inverso",
+                    }
+                    novo_caminho = caminho + [salto]
+                    if proxima == chave_destino:
+                        return novo_caminho
+                    vistos.add(proxima)
+                    fila.append((proxima, novo_caminho))
+            return None
+
+    def esquecer_relacoes_do_fato(self, fato_id: int) -> int:
+        """Apaga as arestas que um fato criou. Devolve quantas.
+
+        Chamado quando o fato é removido. O `ON DELETE CASCADE` já cobre isso
+        no banco, mas o método existe para o caso de REFUTAÇÃO: ali o fato
+        continua na tabela, com confiança baixa, e as arestas dele não deveriam
+        continuar sustentando conclusões.
+        """
+        with self._lock:
+            con = self._connect()
+            with con:
+                cursor = con.execute(
+                    "DELETE FROM relacoes WHERE fato_id = ?", (int(fato_id),)
+                )
+                return cursor.rowcount
+
+    def grafo_stats(self) -> dict[str, int]:
+        with self._lock:
+            con = self._connect()
+            arestas = con.execute("SELECT count(*) AS n FROM relacoes").fetchone()["n"]
+            nos = con.execute(
+                "SELECT count(DISTINCT id) AS n FROM entidades WHERE id IN "
+                "(SELECT origem_id FROM relacoes UNION SELECT destino_id FROM relacoes)"
+            ).fetchone()["n"]
+            return {"nos": int(nos), "arestas": int(arestas)}
 
     def contradictions(self, limite: int = 10) -> list[tuple[Fato, Fato]]:
         """Pares candidatos a se contradizer.

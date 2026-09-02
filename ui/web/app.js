@@ -580,7 +580,12 @@ class App {
       this.sys = ESTADOS[d.estado] || d.estado.toUpperCase();
       // O núcleo pulsa mais forte quando o James está mesmo trabalhando. É o
       // ganho real de ligar dados verdadeiros: a tela para de fingir.
-      this.core?.setIntensity?.(INTENSIDADE[d.estado] ?? 1);
+      //
+      // Durante o despertar, não: a sequência escreve nesta mesma intensidade
+      // a cada quadro, e um estado chegando no meio devolveria o núcleo ao
+      // repouso por um instante. Dois donos do mesmo uniform viram tremida.
+      this.estado = d.estado;
+      if (!this._despertar?.ativo) this.pulsarPeloEstado();
     }
     if (d.vitals) this.vitals = d.vitals;
     if (d.modos) this.modos = d.modos;
@@ -653,14 +658,39 @@ class App {
     }
   }
 
-  toggleMode(to) {
+  /** A pulsação do núcleo pelo estado atual do James. */
+  pulsarPeloEstado() {
+    this.core?.setIntensity?.(INTENSIDADE[this.estado] ?? 1);
+  }
+
+  async toggleMode(to) {
     const alvo = to || (this.mode === 'jarvis' ? 'ultron' : 'jarvis');
     if (alvo === this.mode) return;
     this.mode = alvo;
-    this.core?.setMix?.(alvo === 'ultron' ? 1 : 0);
     for (const h of Object.values(this.holos)) h.setMode?.(alvo);
-    // Apenas paleta e moldura. Nenhuma permissão muda — o guard está no Python.
-    this.log(alvo === 'ultron' ? 'PROTOCOLO ULTRON · paleta reescrita' : 'Arquitetura J.A.R.V.I.S. restaurada');
+
+    // Uma sequência por vez: apertar o botão duas vezes rápido não pode
+    // deixar duas animações disputando os mesmos uniforms.
+    this._despertar?.cancelar();
+
+    const { despertarUltron, restaurarJarvis } = await import('./despertar.js');
+    const anunciar = (linha) => this.log(linha);
+    const seq = alvo === 'ultron'
+      ? despertarUltron(this.core, anunciar)
+      : restaurarJarvis(this.core, anunciar);
+    this._despertar = seq;
+
+    /* A sequência deixa a intensidade no valor do último marco. Enquanto ela
+       corria, os estados que chegaram não puderam pulsar o núcleo; aqui o
+       estado atual retoma o comando — senão o núcleo só voltaria a respirar
+       no próximo evento, que pode demorar. Só se ninguém tomou o lugar. */
+    seq.promessa.then(() => {
+      if (this._despertar === seq) this.pulsarPeloEstado();
+    });
+
+    // Apenas paleta e moldura. Nenhuma permissão muda — o guard está no
+    // Python, e não sabe que este arquivo existe.
+    this.paint();
   }
 
   toggleMic() {

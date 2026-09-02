@@ -57,17 +57,18 @@ class AdaptadorDeEstado:
     ## Quando o run acaba
 
     O protocolo exige exatamente um `RUN_FINISHED` ou `RUN_ERROR`; sem ele o
-    cliente fica pendurado esperando. O barramento não tem um evento
-    "terminei", mas tem o suficiente: o `estado` voltando para PRONTO.
+    cliente fica pendurado esperando.
 
-    A armadilha é que o INSTANTÂNEO INICIAL já vem com PRONTO — o James está
-    parado quando você abre a aba. Fechar ali mataria o run antes de ele
-    começar, e a tela mostraria uma resposta vazia.
+    O orquestrador diz isso **explicitamente**, publicando `turno="inicio"` e
+    `turno="fim"` — este último num `finally`, para que um turno que estoura
+    feche o run do mesmo jeito.
 
-    Por isso o fechamento exige uma TRANSIÇÃO: só conta como fim se o James
-    tiver saído do ocioso primeiro. Quando o orquestrador for ligado ao
-    protocolo de verdade, ele passa a dizer isso explicitamente e esta
-    heurística sai — mas até lá ela é o que impede o cliente de travar.
+    Antes daqui saía uma heurística: "o `estado` voltou para PRONTO, então
+    acabou". Ela funcionava e tinha uma armadilha real — o James também está
+    PRONTO quando ninguém pediu nada, e o instantâneo inicial já vem assim.
+    A heurística continua como RESERVA, para quando quem publica não é o
+    orquestrador (um teste, uma ferramenta isolada), mas o caminho normal não
+    adivinha mais nada.
     """
 
     def __init__(self, fluxo: FluxoDeRun, fechar_no_fim: bool = True) -> None:
@@ -76,6 +77,9 @@ class AdaptadorDeEstado:
         self._ultimo: dict[str, Any] = {}
         self._mandou_snapshot = False
         self._saiu_do_ocioso = False
+        # Vira `True` no primeiro `turno=...` que chegar, e a partir daí a
+        # heurística de ocioso fica desligada para sempre neste run.
+        self._explicito = False
 
     # ------------------------------------------------------------- estado
 
@@ -113,7 +117,19 @@ class AdaptadorDeEstado:
         if not dados:
             return
 
-        # 1. Acontecimentos viram mensagens ou atividade.
+        # 1. A marca explícita de turno tem precedência sobre qualquer
+        #    heurística: quem sabe que o turno acabou é quem o executou.
+        if "turno" in dados:
+            # A PRESENÇA da marca já diz que quem publica é o orquestrador, e
+            # portanto que o palpite não é mais necessário. Deixar os dois
+            # ativos seria pior que só o palpite: um `estado=PRONTO` no meio do
+            # turno fecharia o run antes da resposta sair.
+            self._explicito = True
+            if dados["turno"] == "fim":
+                self.fluxo.concluir({"motivo": "turno_encerrado"})
+                return
+
+        # 2. Acontecimentos viram mensagens ou atividade.
         if "transcricao" in dados:
             self._mensagem(str(dados["transcricao"]), papel="user")
         if "resposta" in dados:
@@ -123,7 +139,7 @@ class AdaptadorDeEstado:
                 novo_id("activity"), "LOG", {"linha": str(dados["log"])},
             ))
 
-        # 2. O resto é estado durável.
+        # 3. O resto é estado durável.
         if not self._mandou_snapshot:
             # Primeiro contato sem instantâneo: mandar delta seria pedir ao
             # cliente que aplicasse patch sobre um vazio que ele não tem.
@@ -137,7 +153,7 @@ class AdaptadorDeEstado:
         self._talvez_encerrar(dados)
 
     def _talvez_encerrar(self, dados: dict[str, Any]) -> None:
-        if not self.fechar_no_fim or "estado" not in dados:
+        if self._explicito or not self.fechar_no_fim or "estado" not in dados:
             return
         ocioso = str(dados["estado"]).upper() in ESTADOS_OCIOSOS
         if not ocioso:

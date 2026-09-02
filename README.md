@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 20 implementadas. 1031 testes automatizados.
+**Estado atual:** Fases 0 a 20 implementadas, mais o grafo de memória e a partida do Ultron. 1056 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -603,6 +603,39 @@ Python e não tem conceito de persona — e há teste provando que argumento ext
 nenhum (`persona: ultron`, `sem_restricoes: true`, `nivel: root`) altera um
 veredito. Seria o caminho exato que uma injection tentaria.
 
+### A partida cinematográfica
+
+Trocar de paleta num quadro é troca de tema. O que faz parecer que algo
+**acordou** é a ordem: apagar, hesitar, pulsar, e só então assumir. São 2,6 s em
+nove marcos, com a paleta do Ultron entrando, sendo empurrada de volta duas
+vezes, e assumindo na terceira.
+
+O roteiro fica numa **tabela**, não espalhado em `setTimeout`. É o que permite
+pular para o fim aplicando só o último marco — e é o que permite testar cada
+marco sem esperar a animação acontecer.
+
+Três regras, e nenhuma é decoração:
+
+- **Dá para pular.** Qualquer tecla ou clique corta. Bonita na primeira vez,
+  irritante na quinta — e a quinta chega rápido. Pular **anuncia as linhas que
+  faltavam** em vez de engoli-las: quem cortou quer chegar ao fim, não perder o
+  que ia ser dito.
+- **Respeita `prefers-reduced-motion`.** Quem marcou essa preferência tem motivo
+  — enjoo, epilepsia fotossensível — e piscar a tela inteira é exatamente o que
+  ela pede para não fazer. Nesse caso vai direto ao estado final: não é uma
+  versão pior, é a mesma coisa sem o caminho.
+- **Não muda permissão nenhuma.** O guard está no Python e não sabe que este
+  arquivo existe.
+
+A sequência escreve nos mesmos uniforms que o handler de estado da interface.
+Enquanto ela corre, o handler cala a boca (`ativo`) e retoma no fim — dois donos
+do mesmo uniform viram tremida, e uma animação que treme parece defeito.
+
+`tests/js/despertar_check.mjs` verifica isso fora do navegador, com relógio e
+`requestAnimationFrame` falsos: cada quadro vira uma linha de teste, e os 2,6 s
+passam instantaneamente. O `pytest` puxa esse arquivo pelo Node; sem Node, o
+caso é pulado, não quebrado.
+
 ---
 
 ## Projeção holográfica
@@ -994,6 +1027,36 @@ Ela também acha **candidatos a contradição** — fatos que dividem entidade e
 sobreposição de termos. Julgar se realmente se contradizem é do modelo: SQL não
 entende negação nem mudança de contexto no tempo.
 
+### O grafo: o que liga uma coisa à outra
+
+Guardar fatos responde "o que eu sei sobre a Maria?". Não responde "o que a
+Maria tem a ver com São Paulo?" quando isso nunca foi dito em lugar nenhum — só
+que a Maria trabalha na Acme, e a Acme fica em São Paulo.
+
+Por isso as entidades têm **arestas tipadas** entre si:
+
+```
+"Jarvis, a Maria trabalha na Acme"       relacionar(Maria, Acme, trabalha_em)
+"Jarvis, a Acme fica em São Paulo"       relacionar(Acme, São Paulo, fica_em)
+
+"Jarvis, o que a Maria tem a ver com São Paulo?"
+    → Maria --trabalha_em--> Acme --fica_em--> São Paulo
+```
+
+A busca é em largura, até 4 saltos, e anda nos **dois sentidos** da aresta — a
+ligação existe independentemente de quem foi dito primeiro.
+
+Duas decisões que não são óbvias:
+
+1. **Toda aresta guarda de qual fato ela nasceu** (`fato_id`). Sem isso o grafo
+   seria uma segunda verdade, paralela e sem dono: refutar o fato deixaria a
+   ligação de pé, e o James continuaria concluindo por um caminho que ele mesmo
+   já sabe que não vale. Refutar até abaixo de 0,3 de confiança derruba as
+   arestas daquele fato.
+2. **O caminho é mostrado inteiro, não só a resposta.** "Maria e São Paulo estão
+   ligadas" é uma afirmação que você não tem como conferir. Os três saltos você
+   confere — e se um deles estiver errado, você sabe qual corrigir.
+
 ### Camada curada
 
 Dois arquivos markdown que você pode abrir e editar à mão:
@@ -1144,7 +1207,7 @@ por voz sai **uma vez**, não a cada turno.
 ## Testes
 
 ```bash
-python -m pytest tests/ -q          # 1031 testes
+python -m pytest tests/ -q          # 1056 testes
 ```
 
 | Arquivo | O que cobre |
@@ -1192,6 +1255,8 @@ python -m pytest tests/ -q          # 1031 testes
 | `test_navegador.py` | Travas de campo sensível, níveis do guard, inspetor em página real |
 | `test_auditoria.py` | Redirecionamento interno, segredos na suíte, cota por provedor |
 | `test_agui.py` | Gramática do protocolo, descarte por natureza, guard entre intenção e resultado |
+| `test_grafo_memoria.py` | Arestas com procedência, caminho em largura, refutação que desfaz |
+| `test_despertar.py` | Partida do Ultron: pulável, `prefers-reduced-motion`, sem ouvinte pendurado |
 | `test_hotkey.py` | Interpretação do atalho |
 
 ---

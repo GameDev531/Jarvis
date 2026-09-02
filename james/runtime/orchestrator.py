@@ -388,6 +388,7 @@ class Orchestrator:
                 continue
             if isinstance(event, tuple) and event[0] == _TEXT:
                 self._cancelled.clear()
+                self.bus.publish(turno="inicio")
                 try:
                     self._set_ui(UiState.THINKING)
                     self._process_transcript(event[1])
@@ -398,9 +399,19 @@ class Orchestrator:
                 finally:
                     self._set_ui(UiState.HIDDEN)
                     self._publish_quota()
+                    self.bus.publish(turno="fim")
                 continue
             if event == _WAKE:
                 self._cancelled.clear()
+                # As marcas de turno existem para o AG-UI saber onde um run
+                # começa e acaba. Antes o adaptador ADIVINHAVA pelo estado —
+                # "voltou para PRONTO, deve ter terminado" —, e adivinhação
+                # erra: o James também está PRONTO quando ninguém pediu nada.
+                #
+                # No `finally` de propósito: um turno que estoura precisa
+                # fechar o run do mesmo jeito, senão a tela fica girando para
+                # sempre esperando um fim que a exceção levou embora.
+                self.bus.publish(turno="inicio")
                 try:
                     self._handle_wake()
                 except Exception:  # noqa: BLE001 — um turno ruim não derruba o James
@@ -410,6 +421,7 @@ class Orchestrator:
                     self._set_ui(UiState.HIDDEN)
                     self._publish_quota()
                     self._resume_wake()
+                    self.bus.publish(turno="fim")
 
     # ----------------------------------------------------------------- turno
 

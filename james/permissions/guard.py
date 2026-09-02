@@ -99,6 +99,9 @@ class Guard:
             "registrar_fato": self._rule_sem_risco,
             "consultar_fatos": self._rule_sem_risco,
             "revisar_fato": self._rule_sem_risco,
+            # Grafo de memória: nota pessoal, como os fatos. Nível 1.
+            "relacionar": self._rule_sem_risco,
+            "como_se_conectam": self._rule_sem_risco,
             "habilidades": self._rule_sem_risco,
             "briefing_do_dia": self._rule_sem_risco,
             "analisar_acao": self._rule_sem_risco,
