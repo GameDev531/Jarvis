@@ -51,6 +51,12 @@ PACKS: dict[str, tuple[str, ...]] = {
         "info_sistema",
         "briefing_do_dia",
         "mais_ferramentas",
+        # Os modos são a PORTA para as outras capacidades: sem `ativar_modo`
+        # sempre disponível, "liga o modo navegador" não tem como funcionar, e
+        # o pack de navegador nunca chegaria a ser útil.
+        "ativar_modo",
+        "desativar_modo",
+        "listar_modos",
     ),
     "memoria": (
         "lembrar",
@@ -96,12 +102,11 @@ PACKS: dict[str, tuple[str, ...]] = {
         "instalar_habilidade",
     ),
     "navegador": (
-        "navegador_abrir",
-        "navegador_listar_abas",
-        "navegador_inspecionar",
-        "navegador_clicar",
-        "navegador_preencher",
-        "navegador_fechar",
+        "abrir_aba",
+        "listar_abas",
+        "inspecionar_pagina",
+        "clicar_em",
+        "preencher_campo",
     ),
 }
 

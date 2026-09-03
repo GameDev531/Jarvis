@@ -25,9 +25,11 @@ import pytest
 from james.config import Config
 from james.memory.curated_store import MemoryStore
 from james.memory.fact_store import FactStore
+from james.modes import build_manager as build_modes
 from james.permissions.guard import Guard
 from james.skills.registry import SkillRegistry
 from james.tools import build_registry
+from james.ui.bus import StateBus
 from james.tools.packs import (
     CORE,
     PACKS,
@@ -38,33 +40,51 @@ from james.tools.packs import (
 )
 
 
-@pytest.fixture(scope="module")
-def catalogo() -> frozenset[str]:
-    """O catálogo REAL, montado como o orquestrador monta."""
+def _registry_completo():
+    """TUDO registrado, inclusive os modos.
+
+    A primeira versão desta fixture não passava `modes`, e o preço foi imediato:
+    o pack `navegador` citava cinco nomes que não existem (`navegador_abrir` em
+    vez de `abrir_aba`), e três ferramentas de modo ficaram órfãs. Nenhuma das
+    duas coisas apareceu, porque o teste de fantasmas EXCLUÍA justamente o pack
+    que estava errado — ficou cego exatamente onde havia o defeito.
+
+    Uma exceção num teste de cobertura é um buraco na cobertura. Se um pack não
+    pode ser conferido, o certo é fazê-lo conferível, não pulá-lo.
+    """
     raiz = Path(tempfile.mkdtemp())
     config = Config({})
-    registry = build_registry(
+    return build_registry(
         config,
         Guard(config),
         memory=MemoryStore(raiz),
         facts=FactStore(raiz / "f.db"),
         skills=SkillRegistry(raiz / "skills"),
+        modes=build_modes(config, on_acao=lambda *a, **k: None, bus=StateBus()),
     )
-    return frozenset(registry.names)
+
+
+@pytest.fixture(scope="module")
+def catalogo() -> frozenset[str]:
+    return frozenset(_registry_completo().names)
 
 
 @pytest.fixture(scope="module")
 def esquemas():
-    raiz = Path(tempfile.mkdtemp())
-    config = Config({})
-    registry = build_registry(
-        config,
-        Guard(config),
-        memory=MemoryStore(raiz),
-        facts=FactStore(raiz / "f.db"),
-        skills=SkillRegistry(raiz / "skills"),
+    return {s.name: s for s in _registry_completo().schemas()}
+
+
+def _tamanho(esquemas, nomes) -> int:
+    presentes = [esquemas[n] for n in nomes if n in esquemas]
+    return len(
+        json.dumps(
+            [
+                {"name": s.name, "description": s.description, "parameters": s.parameters}
+                for s in presentes
+            ],
+            ensure_ascii=False,
+        )
     )
-    return {s.name: s for s in registry.schemas()}
 
 
 # ------------------------------------------------------- a cobertura, os dois lados
@@ -88,11 +108,7 @@ def test_todo_nome_citado_nos_packs_existe_de_verdade(catalogo):
     `"consultar_fato"` em vez de `"consultar_fatos"` deixaria a ferramenta certa
     órfã E o pack apontando para o vazio, sem uma linha de aviso.
     """
-    # `navegador` e os modos só registram quando `modes` existe; ficam de fora
-    # da conferência porque a ausência deles aqui é esperada, não erro.
-    opcionais = set(PACKS["navegador"])
-    citadas = {nome for nomes in PACKS.values() for nome in nomes} - opcionais
-
+    citadas = {nome for nomes in PACKS.values() for nome in nomes}
     fantasmas = sorted(citadas - catalogo)
     assert not fantasmas, f"packs citam ferramenta que não existe: {fantasmas}"
 
@@ -109,11 +125,20 @@ def test_nenhuma_ferramenta_em_dois_packs(catalogo):
     assert not repetidas, f"ferramenta em mais de um pack: {repetidas}"
 
 
-def test_o_core_e_pequeno():
+def test_o_core_e_um_pedaco_pequeno_do_catalogo(esquemas, catalogo):
     """O CORE cresce por tentação — "vai que precisa" — até virar o catálogo
-    inteiro com outro nome, e aí a economia some sem ninguém perceber."""
-    assert len(PACKS[CORE]) <= 8, (
-        f"CORE com {len(PACKS[CORE])} ferramentas; ele deveria ser o mínimo"
+    inteiro com outro nome, e aí a economia some sem ninguém perceber.
+
+    A medida é a FRAÇÃO, não a contagem: dez ferramentas curtas custam menos
+    que quatro com schema grande, e é o custo que interessa. Contar itens daria
+    um limite arbitrário que ou trava adição legítima ou deixa passar um schema
+    gigante — e ainda se ajusta sozinho conforme o catálogo cresce.
+    """
+    core = _tamanho(esquemas, PACKS[CORE])
+    inteiro = _tamanho(esquemas, catalogo)
+    assert core / inteiro < 0.25, (
+        f"CORE em {core / inteiro:.0%} do catálogo ({core} de {inteiro} ch) — "
+        "ele é o piso de TODO turno"
     )
 
 
@@ -232,19 +257,6 @@ def test_o_motivo_da_escolha_fica_registrado():
 # -------------------------------------------------------------- a economia real
 
 
-def _tamanho(esquemas, nomes) -> int:
-    presentes = [esquemas[n] for n in nomes if n in esquemas]
-    return len(
-        json.dumps(
-            [
-                {"name": s.name, "description": s.description, "parameters": s.parameters}
-                for s in presentes
-            ],
-            ensure_ascii=False,
-        )
-    )
-
-
 def test_o_corte_e_real_e_grande(esquemas, catalogo):
     """Número, não promessa: "otimizou tokens" sem medida não vale nada."""
     inteiro = _tamanho(esquemas, catalogo)
@@ -271,13 +283,22 @@ def test_o_pior_caso_nao_e_pior_que_antes(esquemas, catalogo):
 
 
 def test_so_oferece_pack_que_tem_ferramenta_registrada(catalogo):
-    """Anunciar um pack vazio é oferecer porta para sala que não existe."""
-    oferecidos = packs_disponiveis(catalogo)
-    assert "navegador" not in oferecidos, (
-        "navegador foi oferecido sem os modos terem sido registrados"
-    )
-    for pack in oferecidos:
+    """Anunciar um pack vazio é oferecer porta para sala que não existe.
+
+    O modelo pediria, receberia nada, e não teria como entender por quê — o
+    navegador só existe com os modos ligados, as habilidades só com o registro
+    de skills. Um catálogo parcial é o caso normal, não a exceção.
+    """
+    # Com tudo registrado, todo pack tem dono.
+    for pack in packs_disponiveis(catalogo):
         assert catalogo.intersection(PACKS[pack]), f"pack vazio oferecido: {pack}"
+
+    # E com um catálogo parcial, o pack sem ferramenta some da oferta.
+    parcial = frozenset(PACKS[CORE]) | {"analisar_acao"}
+    oferecidos = packs_disponiveis(parcial)
+    assert "financas" in oferecidos
+    assert "navegador" not in oferecidos
+    assert "escritorio" not in oferecidos
 
 
 def test_o_core_nao_e_oferecido(catalogo):
