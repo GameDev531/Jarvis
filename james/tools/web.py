@@ -79,7 +79,11 @@ def register(registry: ToolRegistry, config, guard) -> None:
             parameters={
                 "type": "object",
                 "properties": {
-                    "url": {"type": "string", "description": "Endereço completo do site."}
+                    "url": {
+                        "type": "string",
+                        "description": "Endereço completo do site.",
+                        "audit_mode": "plaintext",
+                    }
                 },
                 "required": ["url"],
             },

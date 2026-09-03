@@ -152,6 +152,9 @@ def register(registry: ToolRegistry, config, guard) -> None:
                     "nome": {
                         "type": "string",
                         "description": "Nome do programa como o usuário o chamou.",
+                        # Identificador, não conteúdo: "qual programa abriu" é
+                        # exatamente o que a trilha existe para responder.
+                        "audit_mode": "plaintext",
                     }
                 },
                 "required": ["nome"],
@@ -170,7 +173,11 @@ def register(registry: ToolRegistry, config, guard) -> None:
             parameters={
                 "type": "object",
                 "properties": {
-                    "nome": {"type": "string", "description": "Nome do programa a fechar."}
+                    "nome": {
+                        "type": "string",
+                        "description": "Nome do programa a fechar.",
+                        "audit_mode": "plaintext",
+                    }
                 },
                 "required": ["nome"],
             },

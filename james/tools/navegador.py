@@ -131,7 +131,13 @@ def register(registry: ToolRegistry, config, guard, modes) -> None:
         ),
         parameters={
             "type": "object",
-            "properties": {"url": {"type": "string", "description": "Endereço completo."}},
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "Endereço completo.",
+                    "audit_mode": "plaintext",
+                }
+            },
             "required": ["url"],
         },
         handler=abrir_aba,
@@ -171,8 +177,17 @@ def register(registry: ToolRegistry, config, guard, modes) -> None:
                 "seletor": {
                     "type": "string",
                     "description": "Seletor CSS do campo, vindo de inspecionar_pagina.",
+                    "audit_mode": "plaintext",
                 },
-                "valor": {"type": "string", "description": "O texto a digitar."},
+                "valor": {
+                    "type": "string",
+                    "description": "O texto a digitar.",
+                    # NUNCA plaintext, nem em modo de depuração: aqui passa o
+                    # que a pessoa digita num formulário — e-mail, endereço,
+                    # nome completo. A anotação vence o modo global de
+                    # propósito; trava não tem chave de depuração.
+                    "audit_mode": "metadata",
+                },
             },
             "required": ["seletor", "valor"],
         },
@@ -188,7 +203,11 @@ def register(registry: ToolRegistry, config, guard, modes) -> None:
         parameters={
             "type": "object",
             "properties": {
-                "seletor": {"type": "string", "description": "Seletor CSS do elemento."},
+                "seletor": {
+                    "type": "string",
+                    "description": "Seletor CSS do elemento.",
+                    "audit_mode": "plaintext",
+                },
             },
             "required": ["seletor"],
         },

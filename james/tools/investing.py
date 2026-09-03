@@ -124,6 +124,7 @@ def register(registry: ToolRegistry, config, guard) -> None:
                     "codigo": {
                         "type": "string",
                         "description": "Código do ativo, ex: PETR4.SA, AAPL, BTC-USD.",
+                        "audit_mode": "plaintext",
                     },
                     "periodo": {
                         "type": "string",

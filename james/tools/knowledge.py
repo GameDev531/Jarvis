@@ -16,7 +16,7 @@ ironia nem mudança de contexto no tempo.
 
 from __future__ import annotations
 
-from james.logs import get_logger
+from james.logs import audit, get_logger
 from james.memory.fact_store import FactStore, FactStoreFull
 from james.skills.installer import SkillInstallError, install_skill
 from james.skills.registry import SkillRegistry

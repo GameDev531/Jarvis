@@ -523,3 +523,15 @@ logs:
   audit_file: logs/audit.jsonl
   max_bytes: 5242880
   backup_count: 3
+  # Quanto CONTEÚDO a trilha de auditoria pode gravar. Ver james/logs/privacy.py.
+  #
+  #   minimal          nem o tamanho do que você falou; só o evento
+  #   standard         padrão. Registra O QUE foi feito, não o que foi digitado.
+  #                    Argumento só vai em texto puro quando o schema da
+  #                    ferramenta declara `audit_mode: plaintext` — caminho de
+  #                    arquivo, nome de programa, URL. O texto de um formulário
+  #                    e a sua frase, nunca.
+  #   debug_explicit   grava tudo em texto puro. É para depurar um problema
+  #                    específico, com você sabendo. Um aviso vai para o log a
+  #                    cada início enquanto estiver ligado.
+  privacy: standard

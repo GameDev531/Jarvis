@@ -43,6 +43,79 @@ def sem_credenciais(monkeypatch):
 
 
 @pytest.fixture
+def dns_falso(monkeypatch):
+    """Substitui `socket.getaddrinfo` por uma tabela declarada pelo teste.
+
+    Existe porque um teste de auditoria resolvia `example.com` DE VERDADE:
+    numa máquina sem DNS ele reprovava código correto, e teste que reprova por
+    causa da rede ensina a ignorar teste vermelho. Além disso, o resolvedor
+    real não é previsível — há provedor de DNS que responde NXDOMAIN com a
+    página de busca dele, e aí o teste do "nome que não existe" passa a
+    testar o provedor.
+
+    Uso:
+
+        dns_falso("exemplo.com", ["93.184.216.34"])
+        dns_falso("caiu.com", erro=True)
+
+    Nome não declarado levanta `gaierror`, como um domínio inexistente — o
+    padrão fecha, e um teste que esqueceu de declarar falha em vez de sair
+    para a rede.
+    """
+    import socket
+
+    tabela: dict[str, list[str] | None] = {}
+
+    def declarar(host: str, ips: list[str] | None = None, *, erro: bool = False):
+        tabela[host.strip().strip("[]").lower()] = None if erro else list(ips or [])
+
+    def _getaddrinfo(host, port, *args, **kwargs):
+        chave = str(host).strip().strip("[]").lower()
+        enderecos = tabela.get(chave, None)
+        if enderecos is None:
+            raise socket.gaierror(f"[dns_falso] '{host}' não foi declarado no teste")
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port or 0)) for ip in enderecos]
+
+    monkeypatch.setattr(socket, "getaddrinfo", _getaddrinfo)
+    return declarar
+
+
+@pytest.fixture(autouse=True)
+def sem_rede(monkeypatch, request):
+    """Nenhum teste unitário abre soquete para fora. Nem por engano.
+
+    A trava é no `socket.socket.connect`: seja `httpx`, `requests` ou o SDK de
+    um provedor, todos passam por ali. Um teste que precise de rede de verdade
+    declara `@pytest.mark.network` (e mora em tests/integration/).
+
+    Isto não é purismo. Um teste que alcança a internet falha quando a
+    internet falha, deixa rastro em serviço de terceiro e — no caso de um
+    provedor de LLM ou de voz — gasta cota de verdade.
+    """
+    if request.node.get_closest_marker("network"):
+        return
+
+    import socket
+
+    real = socket.socket.connect
+
+    def _recusar(self, endereco, *args, **kwargs):
+        # Soquete local (o IPC e a interface holográfica usam) continua valendo:
+        # é dentro da própria máquina e não depende de nada externo.
+        host = endereco[0] if isinstance(endereco, tuple) else endereco
+        if isinstance(host, str) and (
+            host.startswith("127.") or host in ("::1", "localhost", "0.0.0.0")
+        ):
+            return real(self, endereco, *args, **kwargs)
+        raise RuntimeError(
+            f"Teste unitário tentou conectar em {endereco!r}. Use um dublê, ou "
+            "marque o teste com @pytest.mark.network e mova para tests/integration/."
+        )
+
+    monkeypatch.setattr(socket.socket, "connect", _recusar)
+
+
+@pytest.fixture
 def config_data():
     """Config mínima mas realista — espelha o config.yaml de produção."""
     return {

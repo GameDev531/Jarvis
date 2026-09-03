@@ -245,11 +245,16 @@ class LLMClient:
     def reason(
         self,
         conversation: Conversation,
-        text: str,
+        text: str | None = None,
         instruction: str | None = None,
         on_text: TextCallback | None = None,
     ) -> LLMResponse:
         """RACIOCÍNIO — decide, responde e chama ferramentas.
+
+        `text` é o TURNO ATUAL, ainda fora do histórico: quem chama consolida
+        na `Conversation` só depois desta função voltar (ver
+        james/llm/message_builder.py). Passar `text=None` com `instruction` é o
+        caminho da segunda rodada, em que não há comando novo a enviar.
 
         Fecha as tool calls pendentes antes de montar a requisição: é o que
         mantém o histórico consistente depois de um fire-and-forget (C10).

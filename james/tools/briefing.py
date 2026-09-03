@@ -130,6 +130,7 @@ def register(registry: ToolRegistry, config, guard, memory=None) -> None:
                     "cidade": {
                         "type": "string",
                         "description": "Cidade para o clima. Omita para usar a configurada.",
+                        "audit_mode": "plaintext",
                     }
                 },
             },

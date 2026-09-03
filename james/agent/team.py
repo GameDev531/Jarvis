@@ -28,7 +28,7 @@ from typing import Any, Callable
 
 from james.llm.base import NoProviderAvailable, ToolSchema
 from james.llm.history import Conversation
-from james.logs import audit, get_logger
+from james.logs import audit, audit_text, get_logger
 from james.permissions.guard import Decision
 
 logger = get_logger("james.agent.team")
@@ -142,7 +142,7 @@ class SubAgente:
             resultado.erro = "perfil sem ferramentas disponíveis"
             return resultado
 
-        audit("agente_iniciado", perfil=self.perfil.nome, tarefa=tarefa)
+        audit("agente_iniciado", perfil=self.perfil.nome, **audit_text(tarefa, campo="tarefa"))
         self._anunciar("começando")
 
         texto = _INSTRUCAO.format(descricao=self.perfil.descricao, tarefa=tarefa)
@@ -158,6 +158,11 @@ class SubAgente:
                 finally:
                     self.llm.tools = ferramentas_originais
 
+                # Mesmo contrato do agente principal: o turno atual viaja fora
+                # do histórico e só é consolidado depois da requisição. Antes
+                # ele nunca era consolidado — e a partir da segunda iteração o
+                # especialista perdia o enunciado da própria tarefa.
+                conversa.add_user_text(texto)
                 conversa.add_model_response(resposta.text, resposta.tool_calls)
 
                 if not resposta.tool_calls:

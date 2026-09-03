@@ -179,17 +179,43 @@ preciso treinar modelos próprios, o que o projeto suporta.
 ### Antes de compartilhar o projeto
 
 ```bash
-python distribuir.py          # gera james-dist.zip
-python distribuir.py --listar # só mostra o que entraria
+python distribuir.py            # gera james-dist.zip
+python distribuir.py --listar   # só mostra o que entraria
+python distribuir.py --verificar # confere e devolve 0 ou 1 (serve para CI)
+python distribuir.py --recusas   # mostra o que ficou de fora e por quê
 ```
 
 Compactar a pasta à mão **não lê o `.gitignore`**, e foi assim que um ZIP saiu
 daqui com os logs (que guardam seus comandos falados), o token da interface, o
 relatório da máquina e o banco de memória.
 
-O critério é o inverso do intuitivo: em vez de listar o que excluir — e
-esquecer um —, o script pergunta ao git o que é **rastreado**. O que o git não
-versiona não é código do projeto; é dado de execução, e dado de execução é seu.
+A primeira correção perguntava ao git o que era rastreado e passava um filtro
+de suspeitos por cima. Ainda assim escaparam bancos SQLite com os companheiros
+`-wal`/`-shm`, `runtime_state`, contadores de uso e `__pycache__` — porque a
+pergunta continuava invertida: *"a árvore toda, menos o que eu lembrar de
+excluir"*. Nesse modelo, todo formato de artefato que ainda não existia quando
+a lista foi escrita entra por padrão.
+
+Agora é o contrário — **nada entra, exceto o que a allowlist nomeia** — e são
+três camadas, qualquer uma abortando a construção:
+
+1. **allowlist** — quais arquivos da raiz e quais extensões dentro de quais
+   pastas são o projeto;
+2. **denylist** — confere de novo, arquivo a arquivo;
+3. **scanner de segredos** — lê o **conteúdo** dos arquivos aprovados
+   procurando padrão de credencial (Gemini, OpenRouter, GitHub, AWS, chave
+   privada, JWT do Home Assistant, senha embutida).
+
+Achou, **aborta**: nenhum ZIP é gerado. Um ZIP que não sai custa dois minutos;
+um ZIP com a sua chave dentro não tem volta, porque a chave já circulou.
+
+A allowlist tem uma armadilha própria, e ela já mordeu: `state/` e `logs/` são
+pastas de runtime na raiz **e** pacotes Python (`james/state/`, `james/logs/`).
+Um padrão sem âncora casaria com os dois e o pacote sairia sem módulos que o
+boot importa — o mesmo bug que um `state/` no `.gitignore` já causou. Por isso
+a proibição dessas duas é ancorada na raiz, e há teste comparando o pacote com
+`git ls-files` justamente para pegar o que a allowlist apertada deixaria de
+fora.
 
 ### AG-UI: o protocolo da central de agentes
 
@@ -838,7 +864,47 @@ comparado em tempo constante. Ele também resolve uma limitação real: sem
 whisper.cpp não havia confirmação por voz e, portanto, nenhuma ação de Nível 2
 era possível.
 
-Toda ação executada vai para `logs/audit.jsonl`, com segredos removidos.
+### A trilha de auditoria registra O QUE foi feito, não o que você digitou
+
+Toda ação executada vai para `logs/audit.jsonl`. O que **não** vai é conteúdo
+seu.
+
+A redação antiga era por nome de chave — `token`, `password`, `api_key`. Ela
+pegava a chave da API e não pegava nada do que você escreve: o `valor` que o
+James digita num formulário, a frase que você falou, a pergunta que mandou
+pesquisar. Nada disso tem nome de segredo, e tudo isso ia inteiro para o disco.
+Log vira ZIP, print de tela e anexo de e-mail pedindo ajuda.
+
+Agora quem decide é o **schema da ferramenta**, argumento por argumento:
+
+```python
+"seletor": {"type": "string", "audit_mode": "plaintext"},   # em que campo mexeu
+"valor":   {"type": "string", "audit_mode": "metadata"},    # o que digitou, nunca
+```
+
+Na trilha isso sai como `"valor": "<redacted:13 chars>"` — dá para investigar
+("o campo recebeu 13 caracteres, então não ficou vazio") sem revelar nada.
+
+Quatro modos: `plaintext`, `metadata` (tipo e tamanho), `hash` (permite dizer
+"foi o mesmo de antes" sem dizer qual) e `redact`. O padrão **falha fechado**:
+argumento de texto que ninguém anotou vira `metadata`. Uma ferramenta nova,
+escrita amanhã, não vaza por esquecimento.
+
+E o nível global, em `config.yaml`:
+
+```yaml
+logs:
+  privacy: standard      # minimal | standard | debug_explicit
+```
+
+- `minimal` — nem caminho de arquivo; revoga até as permissões `plaintext`;
+- `standard` — o padrão. Sua frase não é gravada: só o tamanho e um digest;
+- `debug_explicit` — grava tudo em texto puro, para depurar um problema
+  específico. Um aviso vai para o log a cada início enquanto estiver ligado.
+
+Uma anotação restritiva no schema vence até o `debug_explicit`: `plaintext` é
+uma permissão, e `redact`/`metadata` é uma trava — trava não tem chave de
+depuração.
 
 ### A suíte que não pode quebrar
 
@@ -1207,8 +1273,31 @@ por voz sai **uma vez**, não a cada turno.
 ## Testes
 
 ```bash
-python -m pytest tests/ -q          # 1056 testes
+# o que a CI unitária roda: sem internet, sem Chromium, determinístico
+python -m pytest -m "not network and not browser and not integration and not e2e" -q
+
+python -m pytest tests/ -q          # tudo (1138 testes)
 ```
+
+Três suítes, e a diferença entre elas é **de que o teste depende**:
+
+| Pasta | Depende de | Roda na CI unitária |
+|---|---|---|
+| `tests/` + `tests/unit/` | nada além do processo | sim |
+| `tests/integration/` | rede, Chromium, serviço externo | não (job separado) |
+| `tests/e2e/` | o James inteiro de pé | não |
+
+A separação existe por dois defeitos concretos. Um teste de auditoria resolvia
+`example.com` **de verdade**: numa máquina sem DNS ele reprovava código
+correto, e teste que fica vermelho por causa da rede ensina a ignorar teste
+vermelho. E `test_navegador.py` tinha um `pytest.importorskip` no meio do
+arquivo — que pula o **módulo inteiro**: sem playwright instalado, as travas
+que recusam campo de senha não rodavam, com a suíte verde.
+
+Agora `sem_rede` (em `tests/conftest.py`) recusa qualquer soquete para fora, e
+o teste que precisa de rede de verdade declara `@pytest.mark.network` e mora
+em `tests/integration/`. Marcador com erro de digitação é erro, não silêncio
+(`--strict-markers`).
 
 | Arquivo | O que cobre |
 |---|---|
@@ -1258,6 +1347,14 @@ python -m pytest tests/ -q          # 1056 testes
 | `test_grafo_memoria.py` | Arestas com procedência, caminho em largura, refutação que desfaz |
 | `test_despertar.py` | Partida do Ultron: pulável, `prefers-reduced-motion`, sem ouvinte pendurado |
 | `test_hotkey.py` | Interpretação do atalho |
+| `unit/test_turno_unico.py` | O comando do usuário viaja uma vez só, nos dois provedores |
+| `unit/test_fluxo_do_turno.py` | A ordem consolidar-depois-da-chamada, do comando ao relato |
+| `unit/test_privacidade_auditoria.py` | Redação por schema, modos de privacidade, o que nunca sai |
+| `unit/test_auditoria_alcancavel.py` | `audit()` sem import: o NameError que a trilha engolia |
+| `unit/test_distribuicao.py` | Allowlist, scanner de segredos, o pacote não perde código |
+| `unit/test_suite_determinista.py` | A suíte unitária não alcança a rede nem o Chromium |
+| `integration/test_navegador_real.py` | Inspetor e travas contra uma página real (`-m browser`) |
+| `integration/test_rede_de_verdade.py` | O resolvedor real concorda com o dublê (`-m network`) |
 
 ---
 

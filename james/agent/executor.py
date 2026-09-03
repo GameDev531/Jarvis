@@ -20,7 +20,7 @@ from enum import Enum
 from typing import Any, Callable
 
 from james.agent.plan import Plan, PlanError, Step, resolve_references
-from james.logs import audit, get_logger
+from james.logs import audit, audit_text, get_logger
 from james.permissions.guard import Decision
 
 logger = get_logger("james.agent.executor")
@@ -109,7 +109,7 @@ class PlanExecutor:
         resultado = PlanResult(objetivo=plan.objetivo)
         escopo: dict[str, Any] = {}
         total = len(plan.steps)
-        audit("plano_iniciado", objetivo=plan.objetivo, passos=total)
+        audit("plano_iniciado", **audit_text(plan.objetivo, campo="objetivo"), passos=total)
 
         for indice, step in enumerate(plan.steps, start=1):
             self._anunciar(indice, total, step)
@@ -135,7 +135,7 @@ class PlanExecutor:
         resultado.escopo = escopo
         audit(
             "plano_concluido",
-            objetivo=plan.objetivo,
+            **audit_text(plan.objetivo, campo="objetivo"),
             executados=resultado.executados,
             total=total,
             concluido=resultado.concluido,

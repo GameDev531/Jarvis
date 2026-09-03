@@ -94,6 +94,7 @@ def register(registry: ToolRegistry, config, guard) -> None:
                         "type": "string",
                         "enum": sorted(perfis),
                         "description": "Qual especialista aciona.",
+                        "audit_mode": "plaintext",
                     },
                     "tarefa": {
                         "type": "string",

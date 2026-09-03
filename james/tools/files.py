@@ -226,7 +226,11 @@ def register(registry: ToolRegistry, config, guard) -> None:
             parameters={
                 "type": "object",
                 "properties": {
-                    "pasta": {"type": "string", "description": "Caminho completo da pasta."}
+                    "pasta": {
+                        "type": "string",
+                        "description": "Caminho completo da pasta.",
+                        "audit_mode": "plaintext",
+                    }
                 },
                 "required": ["pasta"],
             },
@@ -244,7 +248,11 @@ def register(registry: ToolRegistry, config, guard) -> None:
             parameters={
                 "type": "object",
                 "properties": {
-                    "pasta": {"type": "string", "description": "Caminho completo da pasta."}
+                    "pasta": {
+                        "type": "string",
+                        "description": "Caminho completo da pasta.",
+                        "audit_mode": "plaintext",
+                    }
                 },
                 "required": ["pasta"],
             },
@@ -259,8 +267,16 @@ def register(registry: ToolRegistry, config, guard) -> None:
             parameters={
                 "type": "object",
                 "properties": {
-                    "origem": {"type": "string", "description": "Caminho completo do arquivo."},
-                    "destino": {"type": "string", "description": "Pasta ou caminho de destino."},
+                    "origem": {
+                        "type": "string",
+                        "description": "Caminho completo do arquivo.",
+                        "audit_mode": "plaintext",
+                    },
+                    "destino": {
+                        "type": "string",
+                        "description": "Pasta ou caminho de destino.",
+                        "audit_mode": "plaintext",
+                    },
                 },
                 "required": ["origem", "destino"],
             },
@@ -275,10 +291,15 @@ def register(registry: ToolRegistry, config, guard) -> None:
             parameters={
                 "type": "object",
                 "properties": {
-                    "caminho": {"type": "string", "description": "Caminho completo do arquivo."},
+                    "caminho": {
+                        "type": "string",
+                        "description": "Caminho completo do arquivo.",
+                        "audit_mode": "plaintext",
+                    },
                     "novo_nome": {
                         "type": "string",
                         "description": "Novo nome do arquivo, sem caminho.",
+                        "audit_mode": "plaintext",
                     },
                 },
                 "required": ["caminho", "novo_nome"],

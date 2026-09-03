@@ -26,6 +26,16 @@ from james.llm.base import (
     looks_like_quota_error,
 )
 from james.llm.history import Conversation, ToolCall
+from james.llm.message_builder import (
+    FERRAMENTA,
+    MODELO,
+    ORIGEM_ORIENTACAO,
+    SISTEMA,
+    USUARIO,
+    LlmContext,
+    TurnoAtual,
+    build_llm_context,
+)
 from james.logs import get_logger
 
 logger = get_logger("james.llm.gemini")
@@ -326,57 +336,96 @@ class GeminiProvider:
 
     def _build_contents(
         self,
-        conversation: Conversation,
-        audio_wav: bytes | None,
-        text: str | None,
+        conversation: Conversation | None,
+        audio_wav: bytes | None = None,
+        text: str | None = None,
         instruction: str | None = None,
     ) -> list[Any]:
+        """Traduz o contexto lógico para o formato `Content`/`Part` do Gemini.
+
+        Quem decide O QUE entra é `build_llm_context`; aqui só se traduz. Antes,
+        este método decidia sozinho acrescentar o texto atual ao fim — e o
+        orquestrador já o tinha posto no histórico, então o comando ia duas
+        vezes na mesma requisição.
+        """
+        contexto = build_llm_context(
+            conversation,
+            TurnoAtual(text=text or "", audio_wav=audio_wav),
+            instruction=instruction,
+        )
+        return self._serializar(contexto)
+
+    def _serializar(self, contexto: LlmContext) -> list[Any]:
         types = self._types
         contents: list[Any] = []
+        # A orientação do turno não é um `Content` próprio: o Gemini não tem
+        # papel de sistema no meio da conversa, então ela vira o primeiro
+        # `Part` do turno atual — enquadramento antes do comando.
+        orientacao_pendente: str | None = None
 
-        for turn in conversation.turns():
-            if turn.role == "user":
-                if turn.text:
-                    contents.append(
-                        types.Content(role="user", parts=[types.Part.from_text(text=turn.text)])
-                    )
-            elif turn.role == "model":
+        for mensagem in contexto:
+            if mensagem.role == SISTEMA:
+                if mensagem.origem == ORIGEM_ORIENTACAO:
+                    orientacao_pendente = mensagem.text
+                continue
+
+            if mensagem.role == USUARIO:
                 parts = []
-                if turn.text:
-                    parts.append(types.Part.from_text(text=turn.text))
-                for call in turn.tool_calls:
+                if orientacao_pendente:
+                    parts.append(
+                        types.Part.from_text(
+                            text=f"[orientação para esta resposta] {orientacao_pendente}"
+                        )
+                    )
+                    orientacao_pendente = None
+                if mensagem.text:
+                    parts.append(types.Part.from_text(text=mensagem.text))
+                if mensagem.audio_wav:
+                    parts.append(
+                        types.Part.from_bytes(
+                            data=mensagem.audio_wav, mime_type=mensagem.audio_mime
+                        )
+                    )
+                if parts:
+                    contents.append(types.Content(role="user", parts=parts))
+
+            elif mensagem.role == MODELO:
+                parts = []
+                if mensagem.text:
+                    parts.append(types.Part.from_text(text=mensagem.text))
+                for call in mensagem.tool_calls:
                     parts.append(
                         types.Part.from_function_call(name=call.name, args=call.args or {})
                     )
                 if parts:
                     contents.append(types.Content(role="model", parts=parts))
-            elif turn.role == "tool" and turn.tool_name:
+
+            elif mensagem.role == FERRAMENTA and mensagem.tool_name:
                 contents.append(
                     types.Content(
                         role="user",
                         parts=[
                             types.Part.from_function_response(
-                                name=turn.tool_name,
-                                response=_as_response_dict(turn.tool_result),
+                                name=mensagem.tool_name,
+                                response=_as_response_dict(mensagem.tool_result),
                             )
                         ],
                     )
                 )
 
-        current_parts = []
-        if instruction:
-            # Orientação do próprio James para este turno (ex: cumprimentar).
-            # Vem antes do comando para o modelo tratá-la como enquadramento.
-            current_parts.append(
-                types.Part.from_text(text=f"[orientação para esta resposta] {instruction}")
+        if orientacao_pendente:
+            # Segunda rodada: a orientação é a requisição inteira, porque o
+            # comando do usuário já está consolidado no histórico.
+            contents.append(
+                types.Content(
+                    role="user",
+                    parts=[
+                        types.Part.from_text(
+                            text=f"[orientação para esta resposta] {orientacao_pendente}"
+                        )
+                    ],
+                )
             )
-        if text:
-            current_parts.append(types.Part.from_text(text=text))
-        if audio_wav:
-            current_parts.append(
-                types.Part.from_bytes(data=audio_wav, mime_type="audio/wav")
-            )
-        contents.append(types.Content(role="user", parts=current_parts))
         return contents
 
 

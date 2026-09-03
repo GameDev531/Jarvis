@@ -231,6 +231,7 @@ def register(registry: ToolRegistry, config, guard) -> None:
                         "type": "string",
                         "enum": ["aumentar", "diminuir", "mutar"],
                         "description": "O que fazer com o volume.",
+                        "audit_mode": "plaintext",
                     }
                 },
                 "required": ["acao"],

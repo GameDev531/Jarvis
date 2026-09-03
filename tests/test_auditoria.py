@@ -37,8 +37,52 @@ def test_nome_que_aponta_para_dentro_e_bloqueado():
         validar_host("localhost")
 
 
-def test_host_publico_passa():
+def test_host_publico_passa(dns_falso):
+    """Sem tocar no resolvedor de verdade.
+
+    Este teste resolvia `example.com` DE VERDADE. Numa máquina sem DNS — CI
+    sem rede, notebook no avião — ele falhava com o código correto, e um teste
+    que reprova por causa da rede ensina a ignorar teste vermelho.
+    """
+    dns_falso("example.com", ["93.184.216.34"])
     validar_host("example.com")
+
+
+def test_nome_publico_que_aponta_para_ip_privado_e_barrado(dns_falso):
+    """O caso que a resolução literal nunca pega: DNS rebinding.
+
+    O nome é público, o registro A aponta para dentro. Só quem RESOLVE vê.
+    """
+    dns_falso("interno.exemplo.com", ["10.0.0.5"])
+    with pytest.raises(EnderecoBloqueado):
+        validar_host("interno.exemplo.com")
+
+
+def test_basta_UM_registro_apontar_para_dentro(dns_falso):
+    """Um nome pode devolver vários IPs. Barrar só o primeiro deixa passar."""
+    dns_falso("misto.exemplo.com", ["93.184.216.34", "127.0.0.1"])
+    with pytest.raises(EnderecoBloqueado):
+        validar_host("misto.exemplo.com")
+
+
+def test_ipv6_loopback_e_bloqueado():
+    with pytest.raises(EnderecoBloqueado):
+        validar_host("::1")
+
+
+def test_ipv6_entre_colchetes_e_bloqueado():
+    """`http://[::1]:8080` chega com os colchetes na string do host."""
+    with pytest.raises(EnderecoBloqueado):
+        validar_host("[::1]")
+
+
+def test_nome_que_nao_resolve_e_barrado(dns_falso):
+    """Sem saber para onde aponta, não dá para garantir que é externo."""
+    from james.security.enderecos import NaoResolveu
+
+    dns_falso("nao-existe.invalid", erro=True)
+    with pytest.raises(NaoResolveu):
+        validar_host("nao-existe.invalid")
 
 
 def test_sem_resolver_dns_o_ip_literal_ainda_e_barrado():
@@ -289,11 +333,18 @@ def test_o_token_da_interface_nao_vai_para_o_log():
     assert "self.porta" in fonte
 
 
-def test_dns_fora_do_ar_nao_e_chamado_de_ataque():
+def test_dns_fora_do_ar_nao_e_chamado_de_ataque(dns_falso):
     """Barrar continua certo: sem saber para onde o nome aponta, não dá para
-    garantir que é externo. Mas a frase precisa dizer a verdade."""
+    garantir que é externo. Mas a frase precisa dizer a verdade.
+
+    O resolvedor é falso: o comportamento sob teste é o do James quando o DNS
+    não responde, e provocar isso com um domínio `.invalid` de verdade deixava
+    o resultado nas mãos do provedor de DNS da máquina — alguns respondem com
+    a página de busca deles em vez de NXDOMAIN.
+    """
     from james.web.safe_http import NomeNaoResolvido, RedirecionamentoBloqueado, obter
 
+    dns_falso("este-dominio-nao-existe-mesmo-12345.invalid", erro=True)
     cliente = _ClienteFalso([_RespostaFalsa(200)])
     with pytest.raises(NomeNaoResolvido):
         obter(cliente, "https://este-dominio-nao-existe-mesmo-12345.invalid")

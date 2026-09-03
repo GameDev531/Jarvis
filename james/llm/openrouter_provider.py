@@ -33,6 +33,15 @@ from james.llm.base import (
     looks_like_quota_error,
 )
 from james.llm.history import Conversation, ToolCall
+from james.llm.message_builder import (
+    FERRAMENTA,
+    MODELO,
+    SISTEMA,
+    USUARIO,
+    LlmContext,
+    TurnoAtual,
+    build_llm_context,
+)
 from james.logs import get_logger
 
 logger = get_logger("james.llm.openrouter")
@@ -143,7 +152,10 @@ class OpenRouterProvider:
                 "OpenRouter recebe apenas texto. O áudio precisa passar antes pela "
                 "etapa de percepção."
             )
-        if not text:
+        # Uma orientação sozinha é entrada legítima: é assim que a segunda
+        # rodada pede o relato do resultado sem reenviar o comando original,
+        # que já está consolidado no histórico.
+        if not text and not instruction:
             raise ProviderError("Nada a enviar: sem texto.")
 
         payload: dict[str, Any] = {
@@ -317,20 +329,40 @@ class OpenRouterProvider:
 
     def _build_messages(
         self,
-        conversation: Conversation,
-        current_text: str,
+        conversation: Conversation | None,
+        current_text: str | TurnoAtual | None = None,
         instruction: str | None = None,
     ) -> list[dict]:
-        messages: list[dict[str, Any]] = []
-        if self.system_prompt:
-            messages.append({"role": "system", "content": self.system_prompt})
+        """Traduz o contexto lógico para o formato de chat da OpenAI.
 
-        for turn in conversation.turns():
-            if turn.role == "user" and turn.text:
-                messages.append({"role": "user", "content": turn.text})
-            elif turn.role == "model":
-                entry: dict[str, Any] = {"role": "assistant", "content": turn.text or ""}
-                if turn.tool_calls:
+        Quem decide O QUE entra é `build_llm_context`; aqui só se traduz. Foi
+        a decisão duplicada ("o histórico manda o comando E eu mando de novo")
+        que fazia o turno do usuário aparecer duas vezes.
+        """
+        contexto = build_llm_context(
+            conversation,
+            current_text,
+            instruction=instruction,
+            system_prompt=self.system_prompt,
+        )
+        return self._serializar(contexto)
+
+    @staticmethod
+    def _serializar(contexto: LlmContext) -> list[dict]:
+        messages: list[dict[str, Any]] = []
+        for mensagem in contexto:
+            if mensagem.role == SISTEMA:
+                messages.append({"role": "system", "content": mensagem.text})
+            elif mensagem.role == USUARIO:
+                if mensagem.audio_wav is not None:
+                    raise ProviderError(
+                        "OpenRouter recebe apenas texto. O áudio precisa passar antes "
+                        "pela etapa de percepção."
+                    )
+                messages.append({"role": "user", "content": mensagem.text})
+            elif mensagem.role == MODELO:
+                entry: dict[str, Any] = {"role": "assistant", "content": mensagem.text or ""}
+                if mensagem.tool_calls:
                     entry["tool_calls"] = [
                         {
                             "id": call.call_id or f"call_{index}",
@@ -340,24 +372,20 @@ class OpenRouterProvider:
                                 "arguments": json.dumps(call.args or {}, ensure_ascii=False),
                             },
                         }
-                        for index, call in enumerate(turn.tool_calls)
+                        for index, call in enumerate(mensagem.tool_calls)
                     ]
                 messages.append(entry)
-            elif turn.role == "tool" and turn.tool_name:
+            elif mensagem.role == FERRAMENTA and mensagem.tool_name:
                 messages.append(
                     {
                         "role": "tool",
-                        "tool_call_id": turn.call_id or turn.tool_name,
-                        "name": turn.tool_name,
-                        "content": json.dumps(turn.tool_result, ensure_ascii=False, default=str),
+                        "tool_call_id": mensagem.call_id or mensagem.tool_name,
+                        "name": mensagem.tool_name,
+                        "content": json.dumps(
+                            mensagem.tool_result, ensure_ascii=False, default=str
+                        ),
                     }
                 )
-
-        if instruction:
-            # Orientação do turno como mensagem de sistema separada: substituir
-            # o texto do usuário por ela perderia o comando.
-            messages.append({"role": "system", "content": instruction})
-        messages.append({"role": "user", "content": current_text})
         return messages
 
 

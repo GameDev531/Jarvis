@@ -55,3 +55,13 @@ packages = ["james"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 filterwarnings = ["ignore::DeprecationWarning"]
+# Marcador com nome errado vira erro, não silêncio: um `@pytest.mark.netwrok`
+# desligaria a proteção de rede sem ninguém perceber.
+addopts = "--strict-markers"
+markers = [
+    "network: precisa de internet de verdade (DNS, HTTP para fora)",
+    "browser: precisa de um Chromium instalado (playwright install chromium)",
+    "integration: fala com um serviço externo (Home Assistant, provedor de LLM)",
+    "e2e: sobe o James inteiro, de ponta a ponta",
+    "slow: leva mais de alguns segundos",
+]

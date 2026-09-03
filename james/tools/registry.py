@@ -28,6 +28,12 @@ from typing import Any, Callable
 
 from james.llm.base import ToolSchema
 from james.logs import audit, get_logger
+from james.logs.privacy import (
+    AuditMode,
+    limpar_schema,
+    politica_do_schema,
+    redact_args,
+)
 
 logger = get_logger("james.tools")
 
@@ -54,11 +60,30 @@ class Tool:
     )
     handler: Callable[[dict[str, Any]], ToolResult] = None  # type: ignore[assignment]
     fire_and_forget: bool = True
+    # Modo de auditoria dos argumentos que o schema não anotou. `None` deixa a
+    # decisão com o modo de privacidade global, que falha fechado para texto.
+    audit_default: AuditMode | None = None
 
     def schema(self) -> ToolSchema:
+        """O schema COMO O MODELO VÊ — sem as anotações de auditoria.
+
+        `audit_mode`/`sensitive` são metadado do James, não contrato da API do
+        provedor: um validador estrito pode rejeitar campo desconhecido, e de
+        qualquer forma seriam tokens gastos com algo que não informa o modelo.
+        """
         return ToolSchema(
-            name=self.name, description=self.description, parameters=self.parameters
+            name=self.name,
+            description=self.description,
+            parameters=limpar_schema(self.parameters),
         )
+
+    def audit_policy(self) -> dict[str, AuditMode | None]:
+        """`{argumento: modo}` lido das anotações do schema."""
+        return politica_do_schema(self.parameters)
+
+    def audit_args(self, args: dict[str, Any] | None) -> dict[str, Any]:
+        """Os argumentos como podem ir para o disco."""
+        return redact_args(args, self.audit_policy(), self.audit_default)
 
 
 class ToolRegistry:
@@ -96,6 +121,19 @@ class ToolRegistry:
     def get(self, name: str) -> Tool | None:
         return self._tools.get(name)
 
+    def audit_args(self, name: str, args: dict[str, Any] | None) -> dict[str, Any]:
+        """Argumentos prontos para a trilha, segundo o schema DESTA ferramenta.
+
+        Existe no registro, e não em cada chamador, porque quem audita (o
+        orquestrador, o guard, o roteador local) tem o nome da ferramenta mas
+        não o schema dela. Ferramenta desconhecida cai no padrão global — que
+        já falha fechado para texto.
+        """
+        tool = self._tools.get(name)
+        if tool is None:
+            return redact_args(args)
+        return tool.audit_args(args)
+
     @property
     def names(self) -> tuple[str, ...]:
         return tuple(self._tools)
@@ -124,5 +162,5 @@ class ToolRegistry:
             audit("tool_erro", tool=name, erro=repr(exc))
             return ToolResult.failure("Não consegui completar essa ação.")
 
-        audit("tool_executada", tool=name, args=args, ok=result.ok)
+        audit("tool_executada", tool=name, args=tool.audit_args(args), ok=result.ok)
         return result

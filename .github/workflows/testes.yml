@@ -1,0 +1,52 @@
+# Duas CIs, porque são duas perguntas diferentes.
+#
+#   unit         "o código está certo?"        — sem internet, sem Chromium
+#   integracao   "o mundo se comporta assim?"  — instala o Chromium, usa rede
+#
+# A separação existe por causa de um teste que resolvia `example.com` de
+# verdade: numa máquina sem DNS ele reprovava código correto. Um teste que
+# fica vermelho por causa da rede ensina a ignorar teste vermelho — e aí a
+# suíte inteira para de servir.
+
+name: testes
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit:
+    name: unitária (sem rede, sem navegador)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Só o que a suíte unitária importa. Nada de playwright aqui: se um
+      # teste de navegador escapar para a suíte unitária, ele quebra este job
+      # — que é exatamente o alarme que se quer.
+      - run: pip install pytest pyyaml python-dotenv numpy httpx
+      - name: suíte unitária
+        run: pytest -m "not network and not browser and not integration and not e2e" -q
+
+      # A distribuição é fail-closed: se um segredo ou dado de execução entrar
+      # na árvore, o pacote não sai — e a CI reprova antes de alguém publicar.
+      - name: o pacote sairia limpo?
+        run: python distribuir.py --verificar
+
+  integracao:
+    name: integração (rede + Chromium)
+    runs-on: ubuntu-latest
+    # Não bloqueia o merge: depende de serviço de terceiro, e a saúde do
+    # `example.com` não é responsabilidade deste repositório.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pytest pyyaml python-dotenv numpy httpx playwright
+      - run: python -m playwright install --with-deps chromium
+      - name: suíte de integração
+        run: pytest -m "network or browser or integration" -q

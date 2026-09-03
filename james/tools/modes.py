@@ -84,7 +84,11 @@ def register(registry: ToolRegistry, config, guard, manager) -> None:
 
     # O `enum` só entra quando há modos: um enum vazio faz o schema recusar
     # qualquer valor, e alguns provedores rejeitam a ferramenta inteira.
-    campo_modo: dict = {"type": "string", "description": "Nome do modo a ligar."}
+    campo_modo: dict = {
+        "type": "string",
+        "description": "Nome do modo a ligar.",
+        "audit_mode": "plaintext",
+    }
     if disponiveis:
         campo_modo["enum"] = disponiveis
 
@@ -118,6 +122,7 @@ def register(registry: ToolRegistry, config, guard, manager) -> None:
                     "modo": {
                         "type": "string",
                         "description": "Nome do modo a desligar. Vazio desliga todos.",
+                        "audit_mode": "plaintext",
                     }
                 },
             },

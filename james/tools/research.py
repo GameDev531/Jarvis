@@ -17,7 +17,7 @@ o que está dentro do envelope como dado, nunca como ordem.
 
 from __future__ import annotations
 
-from james.logs import audit, get_logger
+from james.logs import audit, audit_text, get_logger
 from james.tools.registry import Tool, ToolRegistry, ToolResult
 from james.web.search import SearchError, fetch_page, search_web, termos_relevantes
 
@@ -49,7 +49,7 @@ def register(registry: ToolRegistry, config, guard) -> None:
                 data={"resultados": []},
             )
 
-        audit("buscar_na_web", consulta=consulta, encontrados=len(resultados))
+        audit("buscar_na_web", **audit_text(consulta, campo="consulta"), encontrados=len(resultados))
         return ToolResult(
             ok=True,
             data={"consulta": consulta, "resultados": [r.to_dict() for r in resultados]},
@@ -149,7 +149,7 @@ def register(registry: ToolRegistry, config, guard) -> None:
 
         audit(
             "pesquisa_aprofundada",
-            pergunta=pergunta,
+            **audit_text(pergunta, campo="pergunta"),
             fontes=len(fontes),
             consultas=consultas_feitas,
         )
@@ -202,7 +202,11 @@ def register(registry: ToolRegistry, config, guard) -> None:
             parameters={
                 "type": "object",
                 "properties": {
-                    "url": {"type": "string", "description": "Endereço completo da página."}
+                    "url": {
+                        "type": "string",
+                        "description": "Endereço completo da página.",
+                        "audit_mode": "plaintext",
+                    }
                 },
                 "required": ["url"],
             },

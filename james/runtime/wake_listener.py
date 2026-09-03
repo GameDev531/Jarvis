@@ -341,6 +341,7 @@ def main() -> int:
         level=str(config.get("logs.level", "INFO")),
         audit_file=config.get("logs.audit_file", "logs/audit.jsonl"),
         process_name="wake",
+        privacy=str(config.get("logs.privacy", "standard")),
     )
 
     try:

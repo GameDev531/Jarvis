@@ -19,6 +19,8 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
+from james.logs.privacy import PrivacyMode, get_privacy_mode, set_privacy_mode
+
 _LOG_FORMAT = "%(asctime)s | %(levelname)-7s | %(name)-22s | %(message)s"
 _DATE_FORMAT = "%H:%M:%S"
 
@@ -70,9 +72,17 @@ def setup_logging(
     max_bytes: int = 5 * 1024 * 1024,
     backup_count: int = 3,
     process_name: str = "james",
+    privacy: str = PrivacyMode.STANDARD.value,
 ) -> None:
-    """Configura logging de arquivo + console. Idempotente."""
+    """Configura logging de arquivo + console. Idempotente.
+
+    `privacy` define quanto CONTEÚDO a trilha pode gravar (ver
+    james/logs/privacy.py). O padrão nunca grava a frase do usuário; subir para
+    `debug_explicit` é uma decisão consciente e fica registrada no log.
+    """
     global _audit_path, _configured
+
+    modo = set_privacy_mode(privacy)
 
     directory = Path(log_dir)
     directory.mkdir(parents=True, exist_ok=True)
@@ -115,6 +125,15 @@ def setup_logging(
     for noisy in ("httpx", "httpcore", "urllib3", "google_genai", "google.genai"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
+    if modo is PrivacyMode.DEBUG_EXPLICIT:
+        # Alto e claro: a trilha vai conter o que a pessoa falou e digitou.
+        # Quem ligar isso e esquecer precisa esbarrar no aviso.
+        logging.getLogger("james.audit").warning(
+            "PRIVACIDADE EM MODO DE DEPURAÇÃO: a trilha vai gravar comandos e "
+            "argumentos em texto puro. Volte logs.privacy para 'standard' "
+            "quando terminar."
+        )
+
     _configured = True
 
 
@@ -134,7 +153,12 @@ def audit(event: str, **fields: Any) -> None:
         "pid": os.getpid(),
         "event": event,
     }
+    # A redação por NOME de chave continua, como segunda camada: ela pega o
+    # segredo que vaza por um caminho sem schema (uma exceção, um dict de
+    # config). O que decide sobre argumento de ferramenta é a política do
+    # schema, aplicada por quem chama (ver james/logs/privacy.py).
     record.update(_redact(fields))
+    record["privacidade"] = get_privacy_mode().value
 
     if _audit_path is None:
         logging.getLogger("james.audit").info("%s | %s", event, record)

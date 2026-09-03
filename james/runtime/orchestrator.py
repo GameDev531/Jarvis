@@ -37,7 +37,7 @@ from james.llm.client import LLMClient, ServiceState
 from james.llm.history import Conversation, ToolCall
 
 from james.llm.router import LocalRouter
-from james.logs import audit, get_logger, setup_logging
+from james.logs import audit, audit_text, get_logger, setup_logging
 from james.memory import MemoryStore
 from james.memory.fact_store import FactStore
 from james.modes import GestureActions, ModeError, build_manager as build_modes
@@ -460,15 +460,26 @@ class Orchestrator:
         tela não tem caminho curto para o sistema.
         """
         logger.info("Comando: %s", transcript)
-        audit("comando", texto=transcript)
+        audit("comando", **audit_text(transcript))
         self._show_transcript("voce", transcript)
-        self.conversation.add_user_text(transcript)
+
+        # O comando NÃO entra no histórico aqui. Quem monta a requisição
+        # recebe o turno atual separado (ver james/llm/message_builder.py), e
+        # consolidar antes fazia o texto viajar duas vezes na mesma chamada.
+        # Cada caminho abaixo consolida no momento certo.
 
         # Roteador local: comandos frequentes não gastam a requisição cara.
         match = self.router.match(transcript)
         if match is not None:
             logger.info("Atendido localmente: %s", match.tool)
-            audit("roteador_local", tool=match.tool, args=match.args)
+            audit(
+                "roteador_local",
+                tool=match.tool,
+                args=self.registry.audit_args(match.tool, match.args),
+            )
+            # Aqui não há requisição: o turno pode ser consolidado de imediato,
+            # e precisa ser — é o que o próximo turno vai ler como contexto.
+            self.conversation.add_user_text(transcript)
             self._execute_one(
                 ToolCall(name=match.tool, args=match.args), spoke_already=False
             )
@@ -478,6 +489,9 @@ class Orchestrator:
             self._reason_turn(transcript)
         except NoProviderAvailable as exc:
             logger.warning("Sem provedor de raciocínio: %s", exc)
+            # Sem modelo não houve requisição, mas o turno existiu: o histórico
+            # precisa registrá-lo para o próximo turno fazer sentido.
+            self.conversation.add_user_text(transcript)
             self._degraded_turn()
 
     def _perceive(self, pcm: bytes) -> str | None:
@@ -518,6 +532,9 @@ class Orchestrator:
             instruction=self._turn_instruction(),
             on_text=on_text,
         )
+        # A requisição voltou: agora o turno vira histórico. Esta ordem é o
+        # contrato — consolidar antes duplicaria o comando no payload.
+        self.conversation.add_user_text(transcript)
         self._announce_service_state()
 
         spoken_ok = True
@@ -564,7 +581,7 @@ class Orchestrator:
             tool=call.name,
             decisao=verdict.decision.value,
             motivo=verdict.reason,
-            args=call.args,
+            args=self.registry.audit_args(call.name, call.args),
         )
 
         if verdict.decision is Decision.BLOCK:
@@ -613,9 +630,12 @@ class Orchestrator:
         if speaker is not None:
             speaker.begin()
         try:
+            # Orientação, não fala do usuário: o comando original já está
+            # consolidado no histórico e não pode ser reenviado como turno novo.
             response = self.llm.reason(
                 self.conversation,
-                text="Relate o resultado ao usuário em uma ou duas frases.",
+                text=None,
+                instruction="Relate o resultado ao usuário em uma ou duas frases.",
                 on_text=speaker.feed if speaker is not None else None,
             )
         except NoProviderAvailable:
@@ -691,7 +711,7 @@ class Orchestrator:
             audit(
                 "confirmacao_voz",
                 resultado=decision.value,
-                transcricao=transcript,
+                **audit_text(transcript, campo="transcricao"),
                 tentativa=attempt + 1,
             )
             if transcript:
@@ -996,6 +1016,7 @@ def main(argv: list[str] | None = None) -> int:
         max_bytes=int(config.get("logs.max_bytes", 5 * 1024 * 1024)),
         backup_count=int(config.get("logs.backup_count", 3)),
         process_name="orchestrator",
+        privacy=str(config.get("logs.privacy", "standard")),
     )
     for warning in config.validate():
         logger.warning(warning)
