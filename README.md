@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 20 implementadas, mais o grafo de memória e a partida do Ultron. 1178 testes automatizados.
+**Estado atual:** Fases 0 a 20 implementadas, mais o grafo de memória e a partida do Ultron. 1235 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -1220,6 +1220,66 @@ modelo invente o nome.
 
 ## Economia de requisições
 
+### O catálogo do turno: 23% do que ia antes
+
+Medido antes de mexer: **34 ferramentas somavam 15.458 caracteres de schema, e
+iam em todo turno.** "Que horas são" pagava a conta do criador de planilha, do
+analisador de ações e do grafo de memória juntos.
+
+Pior que o custo era a direção. Cada ferramenta nova é imposto permanente em
+todo turno futuro — então "dar mais poderes ao James" e "deixar o James mais
+barato e mais preciso" eram objetivos opostos. Com esta camada, deixaram de ser,
+e é por isso que ela veio antes de qualquer ferramenta nova.
+
+O catálogo é dividido em conjuntos (CORE, memória, web, arquivos, escritório,
+finanças, visão, agente, habilidades, navegador). Um roteador determinístico —
+palavra-chave e modo ligado, **sem chamada de modelo** — escolhe os do turno.
+Uma segunda requisição só para escolher ferramentas economizaria tokens na
+principal e custaria uma viagem de rede inteira; numa máquina com 1938 ms de
+latência de conexão, seria trocar dinheiro pelo recurso escasso.
+
+```bash
+python -m james.diagnostics.bench_packs     # 31 comandos representativos
+```
+
+| | fração do catálogo |
+|---|---|
+| mediana | **23%** |
+| média | 28% |
+| melhor caso | 14% |
+| **pior caso** | **56%** |
+| caíram no catálogo inteiro | 0 de 31 |
+
+O pior caso é o número que decide: antes era 100% em *todo* turno, então nenhum
+comando ficou mais caro. Os testes travam os dois — que o corte é real e que o
+pior caso não regride.
+
+**Três coisas que esta camada não é:**
+
+1. **Não é segurança.** Esconder uma ferramenta não impede nada — o guard é
+   quem decide, e ele não sabe que packs existem. Há teste parametrizado
+   provando que o veredito é idêntico com e sem pack; se um dia esconder virar
+   a razão de algo ser seguro, a trava real terá sumido em silêncio.
+2. **Não é para acertar sempre.** Errar para mais custa tokens; errar para
+   MENOS custa a tarefa — o modelo não tem como fazer o que foi pedido, e o que
+   chega até você é "não consigo fazer isso", que parece burrice e não peça
+   faltando. Por isso existe `mais_ferramentas`, sempre no CORE: o modelo pede
+   o conjunto que faltou, custa uma volta a mais só quando o roteador erra, e
+   cada erro fica na trilha — a lista de gatilhos ganha uma fonte de correção
+   que não depende de adivinhação.
+3. **Não pode perder uma ferramenta em silêncio.** Uma ferramenta fora de todo
+   pack nunca chega ao modelo, e nada quebra: nenhuma exceção, nenhum teste
+   vermelho. Ela só deixa de existir, e alguém nota semanas depois. O teste
+   confere a cobertura nos dois sentidos contra o registry montado de verdade.
+
+Um achado do próprio benchmark: o fallback de catálogo inteiro disparava
+exatamente onde era menos justificável — "quem foi Alan Turing" recebia as 34
+ferramentas para uma pergunta que não precisa de nenhuma. Hoje pergunta de
+conhecimento leva CORE + web + memória (os dois destinos plausíveis: procurar e
+lembrar), e cortesia leva só o CORE.
+
+### As duas requisições da rodada
+
 Uma rodada de tool calling custa 2 requisições por necessidade estrutural: o
 modelo pede a tool, o código executa, e o modelo precisa ser chamado de novo
 para saber o resultado. Mas quando o resultado é previsível ("abrir o Chrome",
@@ -1309,7 +1369,7 @@ por voz sai **uma vez**, não a cada turno.
 # o que a CI unitária roda: sem internet, sem Chromium, determinístico
 python -m pytest -m "not network and not browser and not integration and not e2e" -q
 
-python -m pytest tests/ -q          # tudo (1178 testes)
+python -m pytest tests/ -q          # tudo (1235 testes)
 ```
 
 Três suítes, e a diferença entre elas é **de que o teste depende**:
@@ -1385,6 +1445,8 @@ em `tests/integration/`. Marcador com erro de digitação é erro, não silênci
 | `unit/test_privacidade_auditoria.py` | Redação por schema, modos de privacidade, o que nunca sai |
 | `unit/test_auditoria_alcancavel.py` | `audit()` sem import: o NameError que a trilha engolia |
 | `unit/test_trilha_sem_conteudo.py` | Canário pelos caminhos reais: fato, memória, grafo e visão |
+| `unit/test_packs.py` | Cobertura dos conjuntos, escolha por frase, corte medido, guard intacto |
+| `unit/test_packs_no_turno.py` | O recorte chega ao LLM; a saída de emergência não é decorativa |
 | `unit/test_distribuicao.py` | Allowlist, scanner de segredos, o pacote não perde código |
 | `unit/test_suite_determinista.py` | A suíte unitária não alcança a rede nem o Chromium |
 | `integration/test_navegador_real.py` | Inspetor e travas contra uma página real (`-m browser`) |

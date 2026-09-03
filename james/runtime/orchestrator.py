@@ -52,6 +52,7 @@ from james.state.runtime_state import RuntimeState
 from james.system_prompt import build_system_prompt
 from james.ui.bus import StateBus
 from james.tools import build_registry
+from james.tools.packs import PACKS, Selecao, escolher_packs, ferramentas_dos_packs
 from james.ui import UiState, build_interface
 
 logger = get_logger("james.orchestrator")
@@ -159,6 +160,12 @@ class Orchestrator:
         self._cancelled = threading.Event()
         self._paused = False
         self._announced_state: ServiceState | None = None
+
+        # Packs que o modelo pediu com `mais_ferramentas`. Duram só o turno:
+        # carregar finanças porque uma vez ele precisou de ações não é motivo
+        # para carregar finanças para sempre.
+        self._packs_forcados: set[str] = set()
+        self._packs_do_turno = None
 
     # ------------------------------------------------------------ construção
 
@@ -399,6 +406,7 @@ class Orchestrator:
                 finally:
                     self._set_ui(UiState.HIDDEN)
                     self._publish_quota()
+                    self._packs_forcados.clear()
                     self.bus.publish(turno="fim")
                 continue
             if event == _WAKE:
@@ -420,6 +428,7 @@ class Orchestrator:
                 finally:
                     self._set_ui(UiState.HIDDEN)
                     self._publish_quota()
+                    self._packs_forcados.clear()
                     self._resume_wake()
                     self.bus.publish(turno="fim")
 
@@ -511,6 +520,61 @@ class Orchestrator:
         logger.info("Percepção na nuvem indisponível; usando whisper.cpp local.")
         return self.stt.transcribe(pcm)
 
+    # ------------------------------------------------------ catálogo do turno
+
+    def _selecionar_packs(self, transcript: str) -> None:
+        """Recorta o catálogo que o modelo vê neste turno.
+
+        Isto NÃO é segurança: esconder uma ferramenta não impede nada, e o
+        guard — que é quem impede — não sabe que packs existem. É só o custo:
+        o catálogo inteiro são ~3.700 tokens de schema, e "que horas são" não
+        precisa carregar o criador de planilha junto.
+        """
+        selecao = escolher_packs(
+            transcript,
+            modos_ligados=tuple(self.modes.ativos()),
+            forcados=tuple(self._packs_forcados),
+        )
+        self._packs_do_turno = selecao
+        self._aplicar_packs(selecao)
+
+        audit(
+            "packs",
+            escolhidos=selecao.resumo,
+            completo=selecao.completo,
+            motivos=list(selecao.motivos),
+            ferramentas=len(self.llm.tools),
+        )
+
+    def _aplicar_packs(self, selecao) -> None:
+        permitidas = ferramentas_dos_packs(selecao.packs)
+        self.llm.tools = [s for s in self.registry.schemas() if s.name in permitidas]
+
+    def _carregar_pack_pedido(self, call) -> None:
+        """O modelo disse que faltava um conjunto. Entrega antes da 2ª volta.
+
+        Sem isto a chamada seria decorativa: a segunda volta iria com o mesmo
+        catálogo curto que já tinha faltado, e ele pediria de novo — ou, pior,
+        desistiria e diria ao usuário que não consegue.
+
+        A soma é com o que o turno JÁ tinha, nunca um recálculo: recalcular a
+        partir de texto vazio jogaria fora os packs que a frase original
+        justificou, e o modelo perderia ferramentas ao pedir ferramentas.
+        """
+        pedido = str((call.args or {}).get("pack", "")).strip().lower()
+        if pedido not in PACKS or self._packs_do_turno is None:
+            return
+
+        self._packs_forcados.add(pedido)
+        somados = Selecao(
+            packs=self._packs_do_turno.packs | {pedido},
+            motivos=self._packs_do_turno.motivos + (f"{pedido}: pedido pelo modelo",),
+            completo=self._packs_do_turno.completo,
+        )
+        self._packs_do_turno = somados
+        self._aplicar_packs(somados)
+        audit("pack_pedido_pelo_modelo", pack=pedido, agora=somados.resumo)
+
     def _reason_turn(self, transcript: str) -> None:
         """RACIOCÍNIO — decide o que fazer e responde."""
         speaker = self.speaker
@@ -525,6 +589,8 @@ class Orchestrator:
                 self._set_ui(UiState.SPEAKING)
             if speaker is not None:
                 speaker.feed(chunk)
+
+        self._selecionar_packs(transcript)
 
         response = self.llm.reason(
             self.conversation,
@@ -568,6 +634,11 @@ class Orchestrator:
 
             if self._execute_one(call, spoke_already):
                 needs_second_round = True
+            # O modelo avisou que faltava um conjunto de ferramentas. Sem esta
+            # linha a chamada seria inútil: a segunda volta iria com o mesmo
+            # catálogo curto que já tinha faltado, e ele pediria de novo.
+            if call.name == "mais_ferramentas":
+                self._carregar_pack_pedido(call)
             spoke_already = True
 
         if needs_second_round:

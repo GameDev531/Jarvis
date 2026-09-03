@@ -15,10 +15,14 @@ def build_registry(
 ) -> ToolRegistry:
     """Monta o catálogo completo. Cada módulo registra as suas."""
     from james.tools import (
-        apps, briefing, files, investing, office, research, sequence, system, vision, web,
+        apps, briefing, files, investing, meta, office, research, sequence, system,
+        vision, web,
     )
 
     registry = ToolRegistry()
+    # `mais_ferramentas` vem primeiro porque está no CORE: é a saída de
+    # emergência quando o roteador de packs não manda o que era preciso.
+    meta.register(registry, config, guard)
     apps.register(registry, config, guard)
     web.register(registry, config, guard)
     system.register(registry, config, guard)

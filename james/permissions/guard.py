@@ -90,6 +90,10 @@ class Guard:
             "pesquisar_web": self._rule_pesquisar_web,
             "ajustar_volume": self._rule_ajustar_volume,
             "que_horas_sao": self._rule_sem_risco,
+            # Carregar um conjunto de ferramentas não age em nada: só muda
+            # o que o modelo ENXERGA. O que cada ferramenta carregada pode
+            # fazer continua sendo decidido aqui, uma a uma.
+            "mais_ferramentas": self._rule_sem_risco,
             "info_sistema": self._rule_sem_risco,
             # --- memória: nota pessoal, não ação no sistema ---
             "lembrar": self._rule_sem_risco,
