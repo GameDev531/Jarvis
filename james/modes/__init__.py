@@ -62,10 +62,15 @@ def build_manager(config, *, on_acao=None, bus=None, on_comando=None, on_escutar
 
         manager.register(
             BrowserMode(
-                anexar=bool(nav.get("anexar", True)),
+                # O padrão virou `false`: perfil próprio, não o Chrome pessoal.
+                anexar=bool(nav.get("anexar", False)),
                 porta=int(nav.get("porta", 9222)),
                 headless=bool(nav.get("headless", False)),
                 timeout_ms=int(nav.get("timeout_ms", 15000)),
+                perfis_dir=config.resolve_path(
+                    "modos.navegador.perfis_dir", "state/browser_profiles"
+                ),
+                perfil=str(nav.get("perfil", "jarvis-default")),
             )
         )
     return manager

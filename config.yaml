@@ -359,14 +359,27 @@ modos:
   navegador:
     enabled: true
 
-    # ANEXAR ao Chrome que você já usa, em vez de baixar outro navegador.
-    # Ganha o seu perfil (contas, cookies, extensões) e economiza ~150 MB de
-    # download — o que numa máquina modesta é a diferença entre existir e não.
-    # Exige o Chrome aberto assim:  chrome.exe --remote-debugging-port=9222
-    anexar: true
+    # O James usa um perfil SÓ DELE, separado do seu Chrome. Persistente: você
+    # loga uma vez num site e ele lembra na próxima. E apagável sem tocar no
+    # seu navegador ("esquece tudo que você fez no navegador").
+    perfil: jarvis-default
+    perfis_dir: state/browser_profiles
+
+    # MODO AVANÇADO: anexar ao Chrome que VOCÊ usa, em vez do perfil próprio.
+    #
+    # Era o padrão e deixou de ser, por três motivos:
+    #   1. exige o Chrome aberto com --remote-debugging-port=9222, e o Chrome
+    #      moderno restringe cada vez mais a depuração remota do perfil padrão;
+    #   2. o CDP tem fidelidade menor que o protocolo nativo do Playwright, e a
+    #      trava de rede desta fase depende de interceptação de requisição;
+    #   3. dar ao assistente o seu perfil dá a ele o seu banco logado, o seu
+    #      e-mail logado e os seus cookies de sessão. Isso não é padrão que se
+    #      assume por conveniência.
+    #
+    # Ligue a dedo se quiser, sabendo o que significa:
+    anexar: false
     porta: 9222
 
-    # Só usado quando `anexar: false` (navegador próprio, perfil limpo).
     headless: false
     timeout_ms: 15000
 

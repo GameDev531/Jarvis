@@ -151,6 +151,11 @@ class Guard:
             # nenhuma confirmação destrava.
             "preencher_campo": self._rule_agir_no_navegador,
             "clicar_em": self._rule_agir_no_navegador,
+            # Fechar aba é Nível 1: some uma janela, e nada mais. Perder uma
+            # aba aberta irrita; pedir confirmação para cada uma irrita mais, e
+            # confirmação que vira hábito deixa de ser confirmação — a pessoa
+            # passa a dizer "sim" antes de ler, inclusive nas que importam.
+            "fechar_aba": self._rule_sem_risco,
             "ativar_modo": self._rule_ativar_modo,
             # Desligar é Nível 1 sempre, por princípio (ver a regra).
             "desativar_modo": self._rule_desativar_modo,

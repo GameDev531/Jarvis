@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 20 implementadas, mais o grafo de memória e a partida do Ultron. 1235 testes automatizados.
+**Estado atual:** Fases 0 a 20 implementadas, mais o grafo de memória e a partida do Ultron. 1359 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -275,20 +275,110 @@ recarrega, em vez de ler meia resposta achando que foi isso que ele disse.
 "preenche o campo de e-mail com ..."  (pede confirmação)
 ```
 
-**Ele anexa ao Chrome que você já usa**, em vez de baixar um navegador
-próprio. Ganha o seu perfil — contas, cookies, extensões — e economiza ~150 MB
-de download. Para isso o Chrome precisa subir com a porta de depuração:
+#### O perfil é dele, não o seu
 
-```powershell
-chrome.exe --remote-debugging-port=9222
+**O James usa um navegador com perfil próprio**, em `state/browser_profiles/`.
+Persistente — você loga uma vez num site e ele lembra na próxima —, mas
+separado do seu Chrome e apagável sem tocar nele.
+
+Antes o padrão era anexar ao seu Chrome pessoal por CDP, e o argumento era bom:
+suas contas já logadas, sem download de 150 MB. Três coisas derrubaram esse
+padrão:
+
+1. **Não é confiável.** Exige o Chrome aberto com `--remote-debugging-port`, e
+   o Chrome moderno restringe cada vez mais a depuração remota do perfil
+   padrão. Fechar e reabrir o navegador com uma flag não é o que alguém faz
+   para pedir "abre uma aba".
+2. **O CDP tem fidelidade menor** que o protocolo nativo do Playwright, e a
+   trava de rede abaixo depende de interceptação de requisição. Construir a
+   proteção sobre a base menos confiável seria construir ao contrário.
+3. **É o seu banco logado.** Dar o seu perfil ao assistente dá a ele os seus
+   cookies de sessão. Isso não é decisão que se toma por padrão.
+
+Anexar continua existindo como modo avançado — `modos.navegador.anexar: true`,
+ligado a dedo, sabendo o que significa.
+
+**Ligar pede confirmação** porque o navegador age no mundo: clica, envia
+formulário, navega. No modo avançado, mais ainda — ali ele enxerga as suas abas.
+
+#### Toda ação diz em qual aba
+
+Antes, toda ação mutável ia para `contexto.pages[-1]` — a última aba da lista.
+"Última" não é "a que você está vendo": é a ordem interna do Playwright. Basta
+um site abrir um pop-up, ou você abrir uma aba enquanto o James trabalha, e o
+clique acontece em outro lugar.
+
+O modo como isso falhava era o pior possível: **funcionava quase sempre.** Com
+uma aba só, `pages[-1]` está certo. O erro só aparecia com várias — que é
+exatamente quando você está trabalhando de verdade, e quando um clique errado
+custa caro. Um formulário de compra é um formulário de compra em qualquer aba.
+
+Hoje toda aba tem um número estável, e agir exige dizê-lo:
+
+```
+"lista as abas"          → 1 banco.com · 2 loja.com · 3 gmail.com
+"clica em comprar na 2"
 ```
 
-Sem isso ele abre um navegador próprio, de perfil limpo, e avisa. Para forçar
-esse caminho: `modos.navegador.anexar: false`.
+Duas regras que parecem detalhe:
 
-**Ligar pede confirmação** pelo mesmo motivo da webcam, e o motivo é mais forte
-aqui: anexado ao seu Chrome, ele enxerga as abas abertas — onde estão seu
-e-mail, seu banco e seu trabalho. É mais íntimo que a câmera, não menos.
+- **Número de aba nunca é reaproveitado.** Fechou a 3, a próxima é a 4 —
+  senão uma referência antiga do modelo apontaria para uma página nova.
+- **Ler aceita padrão, agir não.** Nem com uma aba só. Ler a aba errada gasta
+  uma leitura; clicar na aba errada compra uma passagem.
+
+E a listagem devolve **domínio, não a URL inteira**: URL carrega token de
+sessão e id de pedido, e a lista de abas vai inteira para o histórico do modelo.
+
+#### O modelo só aponta para o que viu
+
+Entre inspecionar e clicar passam segundos, e a página pode ter navegado,
+trocado de rota ou recarregado uma lista. O seletor `button:nth-of-type(2)`
+continua casando — com outro botão. Pior: nada impedia o modelo de **inventar**
+um seletor porque parecia razoável.
+
+`inspecionar_pagina` devolve um `snapshot_id` e um `element_id` curto (`e1`,
+`e2`) para cada elemento. Agir exige os dois, e antes de executar são seis
+conferências:
+
+1. a aba é a mesma; 2. o snapshot é daquela aba; 3. a origem não mudou;
+4. o documento é o mesmo; 5. o seletor casa com **exatamente um** elemento;
+6. o elemento ainda é o mesmo — mesma tag, mesmo nome acessível.
+
+Qualquer uma que falhe cancela a ação com `PAGINA_MUDOU_INSPECIONE_DE_NOVO`.
+Não é erro: clicar "provavelmente no lugar certo" é pior que não clicar. E o
+seletor CSS não volta para o modelo — devolvê-lo convidaria a montar variações,
+que é o hábito que isto acaba.
+
+Um detalhe que só apareceu testando contra Chromium real: a marca que detecta
+"o documento mudou" estava em `window`, e **`document.write` troca o documento
+inteiro deixando o `window` de pé**. Medido: `window` e `document` sobrevivem;
+só uma marca no elemento `<html>` morre. É onde ela mora hoje.
+
+#### A rede do navegador é uma superfície própria
+
+O `safe_http` protege o que o *Python* busca: resolve o nome, olha o IP, decide.
+Nada disso acontece quando o Chromium navega — quem resolve e conecta é o
+navegador, e o Python nunca vê o IP.
+
+Pior: uma `goto()` dispara dezenas de requisições que o James nunca pediu —
+imagens, scripts, `fetch`, iframes. Validar só a URL digitada protege uma das
+dezenas. Uma página pública pode buscar `http://127.0.0.1:8080/admin` num
+`<img>` e o navegador vai lá.
+
+A trava mora em `page.route("**/*")`, que o Chromium consulta antes de **cada**
+requisição — navegação, subrecurso e cada salto de redirecionamento. Barra
+esquema proibido (`file:`, `javascript:`), IP privado/loopback/link-local,
+endereço de metadados de nuvem (`169.254.169.254`), IPv6 embrulhando IPv4
+(`::ffff:127.0.0.1`), e nome público que **resolve** para IP privado.
+
+Testado contra Chromium real com um servidor local de alvo: navegação, `<img>`,
+`fetch` e redirecionamento público→interno, todos barrados.
+
+**O que não pega, e é honesto dizer:** DNS rebinding. Entre a nossa resolução e
+a do navegador há uma janela, e um servidor hostil pode devolver IP público
+para nós e privado para ele. Fechar isso exigiria um proxy que fizesse a
+conexão — está anotado como trabalho futuro.
 
 #### O inspetor de QA
 
@@ -306,7 +396,7 @@ continua sendo trabalho do modelo de visão.
 
 | | |
 |---|---|
-| **Nível 1** | abrir aba, listar abas, inspecionar — não mudam nada |
+| **Nível 1** | abrir aba, listar abas, inspecionar, fechar aba |
 | **Nível 2** | preencher campo, clicar — pedem confirmação |
 | **Impossível** | senha, upload de arquivo, cartão, CPF, token |
 
@@ -1369,7 +1459,7 @@ por voz sai **uma vez**, não a cada turno.
 # o que a CI unitária roda: sem internet, sem Chromium, determinístico
 python -m pytest -m "not network and not browser and not integration and not e2e" -q
 
-python -m pytest tests/ -q          # tudo (1235 testes)
+python -m pytest tests/ -q          # tudo (1359 testes)
 ```
 
 Três suítes, e a diferença entre elas é **de que o teste depende**:
@@ -1447,6 +1537,12 @@ em `tests/integration/`. Marcador com erro de digitação é erro, não silênci
 | `unit/test_trilha_sem_conteudo.py` | Canário pelos caminhos reais: fato, memória, grafo e visão |
 | `unit/test_packs.py` | Cobertura dos conjuntos, escolha por frase, corte medido, guard intacto |
 | `unit/test_packs_no_turno.py` | O recorte chega ao LLM; a saída de emergência não é decorativa |
+| `unit/test_browser_sessao.py` | Identidade de aba, id nunca reaproveitado, agir sem alvo é recusado |
+| `unit/test_browser_rede.py` | Esquema, IP interno, IPv6 embrulhado, nome que resolve para privado |
+| `unit/test_browser_perfil.py` | Travessia de caminho antes do `rmtree`, limpar um sem tocar no outro |
+| `unit/test_navegador_alvo.py` | O clique vai na aba pedida, não na última; snapshot cruzado é recusado |
+| `integration/test_browser_snapshot_real.py` | As seis conferências contra páginas que mudam de verdade |
+| `integration/test_browser_rede_real.py` | Subrecurso, `fetch` e redirecionamento barrados no Chromium |
 | `unit/test_distribuicao.py` | Allowlist, scanner de segredos, o pacote não perde código |
 | `unit/test_suite_determinista.py` | A suíte unitária não alcança a rede nem o Chromium |
 | `integration/test_navegador_real.py` | Inspetor e travas contra uma página real (`-m browser`) |

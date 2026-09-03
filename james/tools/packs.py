@@ -107,6 +107,7 @@ PACKS: dict[str, tuple[str, ...]] = {
         "inspecionar_pagina",
         "clicar_em",
         "preencher_campo",
+        "fechar_aba",
     ),
 }
 

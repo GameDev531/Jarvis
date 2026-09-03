@@ -35,19 +35,19 @@ PAGINA_RUIM = """
 """
 
 
-@pytest.fixture(scope="module")
-def pagina():
-    from playwright.sync_api import sync_playwright
+@pytest.fixture
+def pagina(navegador):
+    """`navegador` vem do conftest desta pasta.
 
-    with sync_playwright() as p:
-        try:
-            navegador = p.chromium.launch(executable_path="/opt/pw-browsers/chromium")
-        except Exception:                       # noqa: BLE001
-            navegador = p.chromium.launch()
-        pg = navegador.new_page()
-        pg.set_content(PAGINA_RUIM)
-        yield pg
-        navegador.close()
+    Antes esta fixture abria o próprio Playwright. Dois `sync_playwright()` no
+    mesmo processo brigam pelo laço de eventos e o segundo morre com "Sync API
+    inside the asyncio loop" — um erro que fala de asyncio e não tem nada a ver
+    com asyncio. Um navegador por sessão, e o problema não existe.
+    """
+    pg = navegador.new_page()
+    pg.set_content(PAGINA_RUIM)
+    yield pg
+    pg.close()
 
 
 def test_inspetor_acha_os_defeitos_reais(pagina):

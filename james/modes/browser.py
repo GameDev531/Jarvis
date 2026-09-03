@@ -4,9 +4,13 @@ Um modo, e não uma ferramenta solta, porque o navegador é um recurso contínuo
 como a câmera: enquanto ligado, existe uma conexão aberta e um processo do lado
 de lá. "Um recurso, um dono" vale aqui igual.
 
-E é `sensivel = True`. Ligar pede confirmação, pelo mesmo motivo da webcam:
-anexado ao SEU Chrome, o James enxerga as abas abertas — que é onde estão seu
-e-mail, seu banco, seu trabalho. Isso é mais íntimo que a webcam, não menos.
+E é `sensivel = True`. Ligar pede confirmação porque o navegador age no mundo:
+clica, envia formulário, navega. No modo avançado (`anexar: true`) o motivo é
+mais forte ainda — ali ele enxerga as SUAS abas, onde estão seu e-mail, seu
+banco, seu trabalho, o que é mais íntimo que a webcam.
+
+Por padrão, porém, ele usa um perfil só dele (`state/browser_profiles/`), e
+não o seu Chrome. Ver `james/browser/perfil.py` para as três razões.
 
 O que ele NÃO faz nunca, nem com o modo ligado, nem com confirmação: digitar em
 campo de senha, mandar arquivo do disco para um site, mexer em campo oculto.
@@ -33,10 +37,12 @@ class BrowserMode(Mode):
     def __init__(
         self,
         *,
-        anexar: bool = True,
+        anexar: bool = False,
         porta: int = 9222,
         headless: bool = False,
         timeout_ms: int = 15000,
+        perfis_dir=None,
+        perfil: str = "jarvis-default",
     ) -> None:
         super().__init__()
         self._opcoes = {
@@ -44,6 +50,8 @@ class BrowserMode(Mode):
             "porta": porta,
             "headless": headless,
             "timeout_ms": timeout_ms,
+            "perfis_dir": perfis_dir,
+            "perfil": perfil,
         }
         self.driver: NavegadorDriver | None = None
 
@@ -63,7 +71,8 @@ class BrowserMode(Mode):
             driver.parar()
         self._detalhe = ""
         # Anexado, o navegador continua aberto — as abas são do usuário, e
-        # fechá-las junto seria destruir o trabalho dele por tabela.
+        # fechá-las junto seria destruir o trabalho dele por tabela. No perfil
+        # gerenciado, as abas são nossas e vão junto.
         return "Soltei o navegador."
 
     def exigir_driver(self) -> NavegadorDriver:

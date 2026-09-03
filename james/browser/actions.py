@@ -53,11 +53,20 @@ _PADRAO_SENSIVEL = re.compile(
 )
 
 
+# Todo lugar de onde um campo pode denunciar o que é. A lista tem nomes
+# redundantes de propósito: `descrever_campo` chama de `nome`/`id`, a
+# revalidação do snapshot chama de `nome_campo`/`id_campo`, e um campo que
+# passasse por um caminho e não pelo outro escaparia da trava. Já aconteceu:
+# `<input name="password">` sem rótulo acessível não tem `nome` nenhum, e a
+# única pista está no atributo `name`.
+_CHAVES_DO_CAMPO = (
+    "nome", "nome_campo", "id", "id_campo", "name",
+    "autocomplete", "rotulo", "placeholder", "seletor",
+)
+
+
 def _texto_do_campo(info: dict) -> str:
-    return " ".join(
-        str(info.get(k) or "")
-        for k in ("nome", "id", "name", "autocomplete", "rotulo", "placeholder", "seletor")
-    )
+    return " ".join(str(info.get(k) or "") for k in _CHAVES_DO_CAMPO)
 
 
 def conferir_campo(info: dict) -> None:
@@ -110,9 +119,15 @@ def descrever_campo(pagina, seletor: str) -> dict | None:
     return pagina.evaluate(_DESCREVER, seletor)
 
 
-def preencher(pagina, seletor: str, valor: str) -> str:
-    """Digita num campo, depois de a PÁGINA dizer que campo é aquele."""
-    info = descrever_campo(pagina, seletor)
+def preencher(pagina, seletor: str, valor: str, *, estado: dict | None = None) -> str:
+    """Digita num campo, depois de a PÁGINA dizer que campo é aquele.
+
+    `estado` é o que a revalidação do snapshot já leu do elemento. Passá-lo
+    evita perguntar duas vezes à página — e, mais importante, faz a conferência
+    de tipo acontecer sobre EXATAMENTE o mesmo estado que autorizou a ação. Ler
+    de novo abriria uma janela entre "conferi que não é senha" e "digitei".
+    """
+    info = estado if estado is not None else descrever_campo(pagina, seletor)
     if info is None:
         raise AcaoRecusada(f"Não achei nenhum elemento em {seletor!r}.")
     if not info.get("visivel"):
@@ -125,7 +140,7 @@ def preencher(pagina, seletor: str, valor: str) -> str:
     pagina.fill(seletor, valor)
     audit("navegador_preencheu", seletor=seletor, tipo=info.get("tipo"),
           caracteres=len(valor))
-    rotulo = info.get("rotulo") or info.get("nome") or seletor
+    rotulo = info.get("rotulo") or info.get("nome") or info.get("nome_campo") or seletor
     return f"Preenchi {rotulo}."
 
 

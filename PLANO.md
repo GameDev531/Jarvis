@@ -29,7 +29,7 @@ descreve por que as coisas são como são e o que falta.
 | 16 — Projeção holográfica | ✅ | Shader, catálogo curado de 14 assuntos, cascata com tetos |
 | 17 — Voz na nuvem | ✅ | Cadeia ElevenLabs → Piper, orçamento de caracteres |
 | 18 — Wake word sem cadastro | ✅ | openWakeWord, Porcupine e atalho atrás do mesmo contrato |
-| 19 — Modo navegador | ✅ | Anexa ao Chrome real, inspetor de QA, trava de campo sensível |
+| 19 — Modo navegador | ✅ | Perfil próprio, alvo explícito por aba, snapshot binding, política de rede, inspetor de QA |
 | 20 — AG-UI (camada de protocolo) | ✅ | Eventos, gramática, descarte por natureza, `POST /ag-ui` |
 | 21 — Central de agentes (interface) | ⬜ | Painéis, canais, supervisor — sobre a camada acima |
 | 22 — Wake word "James" própria | ⬜ | Treino do modelo pelo openWakeWord |
@@ -39,7 +39,7 @@ descreve por que as coisas são como são e o que falta.
 | 26 — Catálogo dinâmico de ferramentas | ✅ | Packs por conjunto, roteador determinístico, mediana 23% do catálogo |
 | 27 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
 
-**1235 testes automatizados.** Piper, whisper.cpp, Qt e câmera continuam sem
+**1359 testes automatizados.** Piper, whisper.cpp, Qt e câmera continuam sem
 execução em hardware real — a Fase 0 existe para isso. O openWakeWord é a
 exceção: o motor foi carregado de verdade neste ambiente (modelo `hey_jarvis`,
 ~14 MB baixados, 2,4% de um núcleo em escuta contínua num processador

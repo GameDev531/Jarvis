@@ -2,8 +2,8 @@
 
 Divisão de risco, e ela não é arbitrária:
 
-  LER  (Nível 1)   abrir aba, listar abas, inspecionar, ver a página
-  AGIR (Nível 2)   preencher campo, clicar
+  LER  (Nível 1)   abrir aba, listar abas, inspecionar
+  AGIR (Nível 2)   preencher campo, clicar, fechar aba
 
 Abrir uma aba não muda nada no mundo; clicar pode comprar uma passagem. O
 guard pede confirmação para o segundo grupo e não para o primeiro.
@@ -13,6 +13,16 @@ sim **impossível**: campo de senha, upload de arquivo, campo oculto. Ver
 `james/browser/actions.py`. Nenhuma confirmação destrava, porque quem decide
 não é o guard nem o modelo — é o código, olhando o que a página diz que o
 campo é.
+
+## O contrato de alvo, que é a mudança desta fase
+
+Toda ação que MUDA alguma coisa exige `tab_id` e, quando mexe num elemento,
+também `snapshot_id` + `element_id`. Não existe "a última aba", não existe
+seletor CSS inventado pelo modelo. Os três vêm de `inspecionar_pagina`.
+
+Isso é mais verboso para o modelo, de propósito. O custo de escrever um número
+a mais é uma linha de JSON; o custo de clicar na aba errada é uma compra
+confirmada na aba do banco que você deixou aberta.
 """
 
 from __future__ import annotations
@@ -20,11 +30,25 @@ from __future__ import annotations
 from james.browser.actions import AcaoRecusada, clicar as _clicar, preencher as _preencher
 from james.browser.driver import BrowserUnavailable
 from james.browser.inspector import inspecionar as _inspecionar
+from james.browser.network_policy import RedeBloqueada
+from james.browser.sessao import AbaDesconhecida, AlvoAusente
+from james.browser.snapshot import (
+    ElementoNaoEncontrado,
+    SnapshotInvalido,
+    agora,
+    capturar,
+    revalidar,
+)
 from james.logs import get_logger
 from james.modes.base import ModeError
 from james.tools.registry import Tool, ToolRegistry, ToolResult
 
 logger = get_logger("james.tools.navegador")
+
+# Erros que são RECUSA, não falha: o James fez a coisa certa ao não fazer. A
+# frase explica, e o modelo aprende que insistir não muda nada.
+_RECUSAS = (AcaoRecusada, AlvoAusente, AbaDesconhecida, SnapshotInvalido,
+            ElementoNaoEncontrado, RedeBloqueada)
 
 
 def register(registry: ToolRegistry, config, guard, modes) -> None:
@@ -38,8 +62,12 @@ def register(registry: ToolRegistry, config, guard, modes) -> None:
     def _driver():
         return modo.exigir_driver()
 
-    def _pagina():
-        return _driver().pagina_atual()
+    def _recusa(exc) -> ToolResult:
+        codigo = getattr(exc, "codigo", None)
+        dados = {"recusado": True}
+        if codigo:
+            dados["codigo"] = codigo
+        return ToolResult(ok=False, speech=str(exc), data=dados)
 
     # ------------------------------------------------------------- ler
 
@@ -48,14 +76,20 @@ def register(registry: ToolRegistry, config, guard, modes) -> None:
         if not url:
             return ToolResult.failure("Preciso de um endereço.")
         try:
-            pagina = _driver().abrir(url)
+            aba = _driver().abrir(url)
+        except _RECUSAS as exc:
+            return _recusa(exc)
         except (ModeError, BrowserUnavailable) as exc:
             return ToolResult.failure(str(exc))
         except Exception as exc:  # noqa: BLE001 — site fora do ar não derruba o James
             return ToolResult.failure(f"Não consegui abrir: {exc}")
+        resumo = aba.resumo()
         return ToolResult(
-            ok=True, ack="Abri.",
-            data={"url": pagina.url, "titulo": pagina.title()},
+            ok=True,
+            ack=f"Abri na aba {aba.tab_id}.",
+            data={"tab_id": aba.tab_id, "dominio": resumo["dominio"],
+                  "titulo": resumo["titulo"]},
+            external_content=True,
         )
 
     def listar_abas(args: dict) -> ToolResult:
@@ -75,12 +109,24 @@ def register(registry: ToolRegistry, config, guard, modes) -> None:
         )
 
     def inspecionar_pagina(args: dict) -> ToolResult:
+        driver = None
         try:
-            relatorio = _inspecionar(_pagina())
+            driver = _driver()
+            aba = driver.aba_para_ler(args.get("tab_id"))
+            relatorio = _inspecionar(aba.page)
+            snap = capturar(aba.page, aba.tab_id, agora())
+            driver.snapshots.guardar(snap)
+        except _RECUSAS as exc:
+            return _recusa(exc)
         except (ModeError, BrowserUnavailable) as exc:
             return ToolResult.failure(str(exc))
         except Exception as exc:  # noqa: BLE001
             return ToolResult.failure(f"Não consegui inspecionar: {exc}")
+
+        relatorio.update(snap.resumo())
+        # A URL inteira sai do relatório: ela vai para o histórico do modelo e
+        # carrega token de sessão e id de pedido. O domínio já situa.
+        relatorio.pop("url", None)
         return ToolResult(
             ok=True,
             speech=relatorio.get("resumo", ""),
@@ -90,44 +136,86 @@ def register(registry: ToolRegistry, config, guard, modes) -> None:
 
     # ------------------------------------------------------------- agir
 
+    def _resolver_alvo(driver, args):
+        """Aba + snapshot + elemento, revalidados. Levanta se algo não bate."""
+        aba = driver.aba_para_agir(args.get("tab_id"))
+        snap = driver.snapshots.exigir(args.get("snapshot_id"), aba.tab_id)
+        ref = snap.elemento(args.get("element_id"))
+        estado = revalidar(aba.page, snap, ref, agora())
+        return aba, ref, estado
+
     def preencher_campo(args: dict) -> ToolResult:
-        seletor = str(args.get("seletor", "")).strip()
         valor = str(args.get("valor", ""))
-        if not seletor:
-            return ToolResult.failure("Preciso saber qual campo.")
         try:
-            frase = _preencher(_pagina(), seletor, valor)
-        except AcaoRecusada as exc:
-            # Recusa não é falha: o James fez a coisa certa. A frase explica
-            # ao usuário, e o modelo aprende que não adianta insistir.
-            return ToolResult(ok=False, speech=str(exc), data={"recusado": True})
+            driver = _driver()
+            aba, ref, estado = _resolver_alvo(driver, args)
+            frase = _preencher(aba.page, ref.seletor, valor, estado=estado)
+            aba.tocar()
+        except _RECUSAS as exc:
+            return _recusa(exc)
         except (ModeError, BrowserUnavailable) as exc:
             return ToolResult.failure(str(exc))
         except Exception as exc:  # noqa: BLE001
             return ToolResult.failure(f"Não consegui preencher: {exc}")
-        return ToolResult(ok=True, ack=frase, data={"seletor": seletor})
+        return ToolResult(ok=True, ack=frase,
+                          data={"tab_id": aba.tab_id, "element_id": ref.element_id})
 
     def clicar_em(args: dict) -> ToolResult:
-        seletor = str(args.get("seletor", "")).strip()
-        if not seletor:
-            return ToolResult.failure("Preciso saber onde clicar.")
         try:
-            frase = _clicar(_pagina(), seletor)
-        except AcaoRecusada as exc:
-            return ToolResult(ok=False, speech=str(exc), data={"recusado": True})
+            driver = _driver()
+            aba, ref, _ = _resolver_alvo(driver, args)
+            frase = _clicar(aba.page, ref.seletor)
+            aba.tocar()
+            # Clicar muda a página com frequência: a leitura que autorizou este
+            # clique não vale para o próximo. Descartar aqui é o que impede um
+            # segundo clique de acontecer sobre um mapa que já mudou.
+            driver.snapshots.esquecer_aba(aba.tab_id)
+        except _RECUSAS as exc:
+            return _recusa(exc)
         except (ModeError, BrowserUnavailable) as exc:
             return ToolResult.failure(str(exc))
         except Exception as exc:  # noqa: BLE001
             return ToolResult.failure(f"Não consegui clicar: {exc}")
-        return ToolResult(ok=True, ack=frase, data={"seletor": seletor})
+        return ToolResult(
+            ok=True,
+            ack=f"{frase} Se precisar agir de novo, inspecione a página — ela pode ter mudado.",
+            data={"tab_id": aba.tab_id, "element_id": ref.element_id},
+        )
+
+    def fechar_aba(args: dict) -> ToolResult:
+        try:
+            frase = _driver().fechar_aba(args.get("tab_id"))
+        except _RECUSAS as exc:
+            return _recusa(exc)
+        except (ModeError, BrowserUnavailable) as exc:
+            return ToolResult.failure(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return ToolResult.failure(f"Não consegui fechar: {exc}")
+        return ToolResult(ok=True, ack=frase)
 
     # ---------------------------------------------------------- registro
+
+    _TAB = {
+        "type": "string",
+        "description": "Número da aba, vindo de listar_abas ou abrir_aba.",
+        "audit_mode": "plaintext",
+    }
+    _SNAP = {
+        "type": "string",
+        "description": "snapshot_id devolvido por inspecionar_pagina.",
+        "audit_mode": "plaintext",
+    }
+    _ELEM = {
+        "type": "string",
+        "description": "element_id (e1, e2...) devolvido por inspecionar_pagina.",
+        "audit_mode": "plaintext",
+    }
 
     registry.register(Tool(
         name="abrir_aba",
         description=(
-            "Abre um endereço numa aba nova do navegador. Exige o modo "
-            "navegador ligado."
+            "Abre um endereço numa aba nova e devolve o número dela. Exige o "
+            "modo navegador ligado."
         ),
         parameters={
             "type": "object",
@@ -145,7 +233,10 @@ def register(registry: ToolRegistry, config, guard, modes) -> None:
 
     registry.register(Tool(
         name="listar_abas",
-        description="Lista as abas abertas no navegador, com título e endereço.",
+        description=(
+            "Lista as abas abertas, cada uma com um número. Use antes de "
+            "qualquer ação para saber em qual aba agir."
+        ),
         parameters={"type": "object", "properties": {}},
         handler=listar_abas,
         fire_and_forget=False,
@@ -154,12 +245,15 @@ def register(registry: ToolRegistry, config, guard, modes) -> None:
     registry.register(Tool(
         name="inspecionar_pagina",
         description=(
-            "Analisa a página aberta como um revisor de qualidade: hierarquia "
-            "de títulos, imagens sem texto alternativo, campos sem rótulo, "
-            "botões sem nome acessível, alvos pequenos demais e formulários. "
-            "Use quando pedirem para revisar, auditar ou avaliar uma página."
+            "Lê a página de uma aba: problemas de qualidade e acessibilidade, "
+            "e a lista de elementos com que dá para interagir. Devolve um "
+            "snapshot_id e um element_id para cada elemento — são eles que "
+            "clicar_em e preencher_campo exigem. Sempre inspecione antes de agir."
         ),
-        parameters={"type": "object", "properties": {}},
+        parameters={
+            "type": "object",
+            "properties": {"tab_id": _TAB},
+        },
         handler=inspecionar_pagina,
         fire_and_forget=False,
     ))
@@ -167,18 +261,17 @@ def register(registry: ToolRegistry, config, guard, modes) -> None:
     registry.register(Tool(
         name="preencher_campo",
         description=(
-            "Digita um valor num campo da página aberta. NUNCA funciona em "
-            "campo de senha, upload de arquivo ou dado sensível — esses são "
-            "recusados pelo sistema, não adianta tentar."
+            "Digita um valor num campo. Exige tab_id, snapshot_id e element_id "
+            "de inspecionar_pagina — não invente seletores. NUNCA funciona em "
+            "campo de senha, upload de arquivo ou dado sensível: são recusados "
+            "pelo sistema, não adianta tentar."
         ),
         parameters={
             "type": "object",
             "properties": {
-                "seletor": {
-                    "type": "string",
-                    "description": "Seletor CSS do campo, vindo de inspecionar_pagina.",
-                    "audit_mode": "plaintext",
-                },
+                "tab_id": _TAB,
+                "snapshot_id": _SNAP,
+                "element_id": _ELEM,
                 "valor": {
                     "type": "string",
                     "description": "O texto a digitar.",
@@ -189,7 +282,7 @@ def register(registry: ToolRegistry, config, guard, modes) -> None:
                     "audit_mode": "metadata",
                 },
             },
-            "required": ["seletor", "valor"],
+            "required": ["tab_id", "snapshot_id", "element_id", "valor"],
         },
         handler=preencher_campo,
     ))
@@ -197,19 +290,29 @@ def register(registry: ToolRegistry, config, guard, modes) -> None:
     registry.register(Tool(
         name="clicar_em",
         description=(
-            "Clica num elemento da página aberta. Use o seletor devolvido por "
-            "inspecionar_pagina."
+            "Clica num elemento. Exige tab_id, snapshot_id e element_id de "
+            "inspecionar_pagina. Depois de clicar, a página pode ter mudado — "
+            "inspecione de novo antes da próxima ação."
         ),
         parameters={
             "type": "object",
             "properties": {
-                "seletor": {
-                    "type": "string",
-                    "description": "Seletor CSS do elemento.",
-                    "audit_mode": "plaintext",
-                },
+                "tab_id": _TAB,
+                "snapshot_id": _SNAP,
+                "element_id": _ELEM,
             },
-            "required": ["seletor"],
+            "required": ["tab_id", "snapshot_id", "element_id"],
         },
         handler=clicar_em,
+    ))
+
+    registry.register(Tool(
+        name="fechar_aba",
+        description="Fecha uma aba pelo número.",
+        parameters={
+            "type": "object",
+            "properties": {"tab_id": _TAB},
+            "required": ["tab_id"],
+        },
+        handler=fechar_aba,
     ))
