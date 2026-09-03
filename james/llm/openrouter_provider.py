@@ -42,7 +42,8 @@ from james.llm.message_builder import (
     TurnoAtual,
     build_llm_context,
 )
-from james.logs import get_logger
+from james.llm.orcamento import TETO_PADRAO
+from james.logs import audit, get_logger
 
 logger = get_logger("james.llm.openrouter")
 
@@ -65,6 +66,11 @@ class ModeloInexistente(ProviderError):
 
 
 class OpenRouterProvider:
+
+    # Atributo de CLASSE, não só de instância: um provedor montado sem
+    # passar pelo `__init__` (dublê de teste, subclasse) continua tendo
+    # teto. Sem isso o corte some justamente onde ninguém olha.
+    teto_contexto: int = TETO_PADRAO
     name = "openrouter"
     accepts_audio = False
     # Aceita imagem quando há modelos de visão configurados. Vários modelos
@@ -82,7 +88,9 @@ class OpenRouterProvider:
         temperature: float = 0.7,
         max_output_tokens: int = 1200,
         vision_models: list[str] | None = None,
+        teto_contexto: int = TETO_PADRAO,
     ) -> None:
+        self.teto_contexto = int(teto_contexto)
         if not api_key:
             raise ProviderError("OPENROUTER_API_KEY ausente.")
         if not models:
@@ -344,7 +352,20 @@ class OpenRouterProvider:
             current_text,
             instruction=instruction,
             system_prompt=self.system_prompt,
+            teto=self.teto_contexto,
         )
+        corte = getattr(contexto, "corte", None)
+        if corte is not None and corte.houve_corte:
+            # Um corte silencioso é a pior versão desta funcionalidade: a
+            # resposta piora e ninguém sabe por quê.
+            audit(
+                "contexto_cortado",
+                provedor=self.name,
+                resultados=corte.resultados_encolhidos,
+                turnos=corte.turnos_removidos,
+                liberado=corte.caracteres_liberados,
+                coube=corte.coube,
+            )
         return self._serializar(contexto)
 
     @staticmethod

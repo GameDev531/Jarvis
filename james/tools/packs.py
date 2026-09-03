@@ -198,8 +198,46 @@ _ABERTURAS_DE_PERGUNTA = (
 )
 
 
+# Palavras que abrem uma fala sem dizer nada sobre ela. Em texto escrito quase
+# não aparecem; em FALA são a regra — "e o que você acha", "então me explica",
+# "james, por que...". O benchmark mostrou o estrago: cinco de seis perguntas
+# naturais caíam no catálogo inteiro porque tinham uma dessas na frente.
+_ENFEITES = (
+    "e", "entao", "ai", "mas", "ok", "beleza", "olha", "escuta", "ei",
+    "james", "jarvis", "ultron", "cara", "po", "so", "agora", "bom",
+    "hmm", "hm", "ah", "eh", "tipo", "veja", "diz", "me diz",
+)
+
+
+def _sem_enfeite(texto_normal: str) -> str:
+    """Tira os enfeites do começo, um por vez.
+
+    Um por vez, e não todos de uma: "e aí, james, o que você acha" tem três
+    empilhados, e uma passada só deixaria dois.
+
+    O teto é o número de palavras da frase, não uma constante: o laço já para
+    quando nada muda, então o teto só existe contra o caso patológico — e um
+    número fixo (4, por exemplo) faria uma transcrição ruidosa de dez sílabas
+    sobrar com metade dos enfeites e ainda parecer um pedido.
+    """
+    texto = texto_normal
+    for _ in range(len(texto_normal.split()) + 1):
+        anterior = texto
+        for enfeite in _ENFEITES:
+            if texto.startswith(enfeite + " "):
+                texto = texto[len(enfeite) + 1:].lstrip(" ,")
+                break
+            if texto.startswith(enfeite + ", "):
+                texto = texto[len(enfeite) + 2:].lstrip(" ,")
+                break
+        if texto == anterior:
+            break
+    return texto
+
+
 def _parece_pergunta(texto_normal: str) -> bool:
-    return any(texto_normal.startswith(a) for a in _ABERTURAS_DE_PERGUNTA)
+    limpo = _sem_enfeite(texto_normal)
+    return any(limpo.startswith(a) for a in _ABERTURAS_DE_PERGUNTA)
 
 
 # Cortesia não é pedido. Sem esta lista, "tudo bem com você" caía no fallback
@@ -214,7 +252,8 @@ _CORTESIAS = (
 
 
 def _parece_cortesia(texto_normal: str) -> bool:
-    return any(texto_normal.startswith(c) for c in _CORTESIAS)
+    limpo = _sem_enfeite(texto_normal)
+    return any(limpo.startswith(c) for c in _CORTESIAS)
 
 
 def escolher_packs(
@@ -249,7 +288,13 @@ def escolher_packs(
             escolhidos.add(pack)
             motivos.append(f"{pack}: '{achado}'")
 
-    if len(escolhidos) == 1 and len(texto_normal.split()) > 3:
+    # A contagem é sobre o texto SEM enfeite. "e aí, james, oi" tem quatro
+    # palavras e é um "oi" — e um assistente de voz recebe muito disso:
+    # transcrição truncada, ruído virando sílaba, começo de frase que a pessoa
+    # abandonou. Contar o enfeite mandaria o catálogo inteiro para o barulho,
+    # que é o caminho mais caro que existe.
+    essencial = _sem_enfeite(texto_normal)
+    if len(escolhidos) == 1 and len(essencial.split()) > 3:
         # Sem gatilho nenhum, e a frase é longa o bastante para ser um pedido.
         # Aqui o roteador sabe menos, e é onde errar para menos custa mais.
         #

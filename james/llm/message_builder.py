@@ -57,6 +57,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Iterator
 
+from james.llm import orcamento
 from james.llm.history import Conversation, ToolCall, Turn
 from james.logs import get_logger
 
@@ -119,6 +120,8 @@ class LlmContext:
     # turno atual no histórico ANTES da chamada. O contexto sai correto, mas
     # há um bug a montante.
     duplicacao_evitada: bool = False
+    # O que o orçamento sacrificou, quando havia teto. `None` = não houve teto.
+    corte: object = None
 
     def __iter__(self) -> Iterator[Mensagem]:
         return iter(self.mensagens)
@@ -182,12 +185,39 @@ def build_llm_context(
     *,
     instruction: str | None = None,
     system_prompt: str | None = None,
+    teto: int | None = None,
 ) -> LlmContext:
     """Monta a sequência lógica que os provedores traduzem para a rede.
 
     `current_turn` aceita string por conveniência dos chamadores antigos; o
     tipo canônico é `TurnoAtual`.
+
+    `teto` liga o orçamento de contexto. Ele mora AQUI, e não em cada provedor,
+    pelo mesmo motivo que este módulo existe: dois lugares aplicando o corte
+    dariam dois cortes diferentes, e o bug apareceria só num dos provedores —
+    que é exatamente a forma do bug de turno duplicado que este arquivo veio
+    resolver.
     """
+    contexto = _montar(
+        conversation, current_turn,
+        instruction=instruction, system_prompt=system_prompt,
+    )
+
+    if teto:
+        # Um só ponto de corte, depois de a sequência estar completa. Aplicar
+        # em cada `return` daria três lugares para esquecer um — e o esquecido
+        # seria descoberto por uma requisição recusada em produção.
+        contexto.corte = orcamento.aplicar(contexto.mensagens, teto=teto)
+    return contexto
+
+
+def _montar(
+    conversation: Conversation | None,
+    current_turn: TurnoAtual | str | None = None,
+    *,
+    instruction: str | None = None,
+    system_prompt: str | None = None,
+) -> LlmContext:
     if isinstance(current_turn, str):
         current_turn = TurnoAtual(text=current_turn)
 

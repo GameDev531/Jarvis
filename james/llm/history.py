@@ -22,6 +22,8 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any
 
+from james.llm.resultado_policy import aplicar as aplicar_politica
+
 AUDIO_PLACEHOLDER = "[comando de voz]"
 SYNTHETIC_RESULT = {"status": "ok"}
 
@@ -102,9 +104,24 @@ class Conversation:
             self._prune()
 
     def add_tool_result(self, name: str, result: Any, call_id: str | None = None) -> None:
+        """Guarda o resultado, já do tamanho que cabe no contexto.
+
+        A poda acontece AQUI, e não em cada chamador, porque são sete pontos de
+        chamada em dois arquivos — e o esquecido seria descoberto por um
+        contexto inchado que ninguém sabe explicar. Este é o único caminho pelo
+        qual um resultado entra no histórico.
+
+        Medido antes: resultado de ferramenta era 61% do contexto numa conversa
+        de quatro leituras de página. A conversa em si, 11%.
+        """
         with self._lock:
             self._turns.append(
-                Turn(role="tool", tool_name=name, tool_result=result, call_id=call_id)
+                Turn(
+                    role="tool",
+                    tool_name=name,
+                    tool_result=aplicar_politica(name, result),
+                    call_id=call_id,
+                )
             )
             self._prune()
 

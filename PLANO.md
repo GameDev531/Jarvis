@@ -37,9 +37,10 @@ descreve por que as coisas são como são e o que falta.
 | 24 — Partida cinematográfica do Ultron | ✅ | Roteiro em tabela, pulável, respeita `prefers-reduced-motion` |
 | 25 — Grafo de memória | ✅ | Arestas tipadas com procedência, travessia em largura, refutação desfaz |
 | 26 — Catálogo dinâmico de ferramentas | ✅ | Packs por conjunto, roteador determinístico, mediana 23% do catálogo |
-| 27 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
+| 27 — Orçamento de contexto | ✅ | Poda por ferramenta na entrada, teto com ordem de sacrifício, −53% medido |
+| 28 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
 
-**1359 testes automatizados.** Piper, whisper.cpp, Qt e câmera continuam sem
+**1420 testes automatizados.** Piper, whisper.cpp, Qt e câmera continuam sem
 execução em hardware real — a Fase 0 existe para isso. O openWakeWord é a
 exceção: o motor foi carregado de verdade neste ambiente (modelo `hey_jarvis`,
 ~14 MB baixados, 2,4% de um núcleo em escuta contínua num processador

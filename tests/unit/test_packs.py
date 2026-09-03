@@ -359,3 +359,47 @@ def test_ferramenta_de_risco_continua_de_risco_dentro_do_pack():
         "mover_arquivo", {"origem": "C:/Windows/system32/kernel32.dll", "destino": "D:/"}
     )
     assert veredito.decision.value != "allow"
+
+
+# ------------------------------------------------------- os enfeites da fala
+
+
+@pytest.mark.parametrize(
+    "frase",
+    [
+        "e o que você acha disso tudo",
+        "então me explica o que é entropia",
+        "aí quem foi Alan Turing",
+        "james, por que o céu é azul",
+        "e aí, james, o que você acha",
+        "mas como funciona um motor",
+        "ok, vale a pena comprar isso",
+    ],
+)
+def test_enfeite_no_comeco_nao_derruba_o_reconhecimento(frase):
+    """Achado do benchmark de contexto, e é um caso de FALA, não de texto.
+
+    O detector de pergunta está ancorado no começo. Escrevendo, ninguém digita
+    "e o que você acha"; falando, é a forma normal. Cinco de seis perguntas
+    naturais caíam no catálogo inteiro por causa de uma palavra na frente —
+    e o James é um assistente de voz.
+    """
+    selecao = escolher_packs(frase)
+    assert selecao.completo is False, f"'{frase}' levou o catálogo inteiro"
+    assert selecao.packs == {CORE, "web", "memoria"}
+
+
+def test_enfeites_empilhados_saem_todos():
+    """"e aí, james, o que você acha" tem três; uma passada só deixaria dois."""
+    assert escolher_packs("e aí, james, o que você acha").completo is False
+
+
+def test_frase_feita_so_de_enfeite_nao_trava():
+    """O teto de repetições existe para isto."""
+    assert escolher_packs("e e e e e e e e e e").packs == {CORE}
+
+
+def test_o_enfeite_nao_engole_um_pedido_de_verdade():
+    """"e" na frente não pode transformar comando em pergunta."""
+    selecao = escolher_packs("e organiza a pasta de downloads pra mim")
+    assert "arquivos" in selecao.packs

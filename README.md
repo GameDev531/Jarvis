@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 20 implementadas, mais o grafo de memória e a partida do Ultron. 1359 testes automatizados.
+**Estado atual:** Fases 0 a 20 implementadas, mais o grafo de memória e a partida do Ultron. 1420 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -1368,6 +1368,89 @@ ferramentas para uma pergunta que não precisa de nenhuma. Hoje pergunta de
 conhecimento leva CORE + web + memória (os dois destinos plausíveis: procurar e
 lembrar), e cortesia leva só o CORE.
 
+### O contexto do turno: 53% do que ia antes
+
+O recorte de catálogo cuidou dos schemas. Medindo o resto, o retrato foi outro:
+
+```
+system prompt .........  9.028 ch   29%
+histórico (a conversa)   3.324 ch   11%
+RESULTADOS DE TOOL ....  19.191 ch  61%
+```
+
+**A conversa é 11%.** O resto é o modelo relendo, a cada turno, o texto
+integral de páginas que ele já resumiu no turno em que as leu. E `max_turns=12`
+não protegia disso, porque conta TURNOS e não tamanho — doze turnos podem ser
+3 KB ou 100 KB, e o código não sabia a diferença.
+
+Duas camadas, com papéis diferentes:
+
+**A política por ferramenta** (`james/llm/resultado_policy.py`) age na
+entrada, sabendo o que aquele resultado significa: `listar_abas` precisa da
+lista inteira, `ler_pagina` precisa dos primeiros parágrafos e não dos cem
+seguintes. Uma ferramenta sem política declarada cai num padrão apertado — a
+mesma escolha da política de auditoria, e pelo mesmo motivo: a ferramenta que
+alguém escrever amanhã não pode inchar o contexto por esquecimento.
+
+O que **nunca** é cortado são os identificadores (`tab_id`, `snapshot_id`,
+`element_id`). Truncar dado é perder detalhe; truncar identificador é criar um
+bug com cara de dado — a ferramenta seguinte recebe uma string que parece
+válida e aponta para nada, e falha com uma mensagem sem relação com a causa.
+
+**O orçamento** (`james/llm/orcamento.py`) é a rede de segurança, na saída,
+quando o total estoura mesmo assim. A ordem do sacrifício vai do menos ao mais
+custoso: resultado antigo encolhe, depois turno antigo sai. System prompt e
+turno atual nunca caem — um turno atual cortado é o James respondendo a meia
+pergunta.
+
+Ele mora em `build_llm_context`, o ponto único por onde os dois provedores
+passam. Dois lugares aplicando o corte dariam dois cortes diferentes, e o bug
+apareceria só num dos provedores — que é exatamente a forma do bug de turno
+duplicado que aquele módulo veio resolver.
+
+```bash
+python -m james.diagnostics.bench_contexto
+```
+
+| cenário | cru | +poda | +packs | redução |
+|---|---|---|---|---|
+| pesquisa longa | 69.893 | 32.657 | 21.200 | **70%** |
+| revisão de página | 54.190 | 35.626 | 24.169 | 55% |
+| memória | 34.832 | 30.521 | 21.766 | 38% |
+| conversa sem ferramenta | 26.559 | 26.559 | 19.688 | 26% |
+| **TOTAL** | **185.474** | 125.363 | **86.823** | **53%** |
+
+#### O corte não pode quebrar um par
+
+Um histórico que começa com resposta de ferramenta sem a chamada é rejeitado
+pela API inteira — o corte que devia salvar a requisição seria o que a derruba.
+
+Esse defeito é raro e por isso perigoso: medido contra o código sem a
+proteção, de **570 tetos testados entre 300 e 6.000, apenas dois** produzem um
+par quebrado. Uma lista de tetos escolhidos à mão praticamente nunca acerta um
+deles — e foi assim que a primeira versão do teste passou com a proteção
+inteiramente ausente. Hoje o teste é uma varredura, e acha os dois.
+
+#### Um achado do benchmark, sobre fala
+
+O detector de "isto é uma pergunta, não um pedido" estava ancorado no começo da
+frase. Escrevendo, ninguém digita "e o que você acha"; **falando, é a forma
+normal** — e o James é um assistente de voz. Cinco de seis perguntas naturais
+caíam no catálogo inteiro por causa de uma palavra na frente:
+
+```
+"o que você acha disso"        →  core, web, memória
+"e o que você acha disso"      →  CATÁLOGO INTEIRO
+"então me explica..."          →  CATÁLOGO INTEIRO
+"james, por que o céu é azul"  →  CATÁLOGO INTEIRO
+```
+
+Hoje os enfeites da fala saem antes de qualquer decisão, e a contagem de
+palavras é feita sobre o que sobra: "e aí, james, oi" tem quatro palavras e é
+um "oi". Isso também cobre o caso que mais aparece num assistente de voz —
+transcrição truncada e ruído virando sílaba, que antes tomavam o caminho mais
+caro que existe.
+
 ### As duas requisições da rodada
 
 Uma rodada de tool calling custa 2 requisições por necessidade estrutural: o
@@ -1459,7 +1542,7 @@ por voz sai **uma vez**, não a cada turno.
 # o que a CI unitária roda: sem internet, sem Chromium, determinístico
 python -m pytest -m "not network and not browser and not integration and not e2e" -q
 
-python -m pytest tests/ -q          # tudo (1359 testes)
+python -m pytest tests/ -q          # tudo (1420 testes)
 ```
 
 Três suítes, e a diferença entre elas é **de que o teste depende**:
@@ -1541,6 +1624,8 @@ em `tests/integration/`. Marcador com erro de digitação é erro, não silênci
 | `unit/test_browser_rede.py` | Esquema, IP interno, IPv6 embrulhado, nome que resolve para privado |
 | `unit/test_browser_perfil.py` | Travessia de caminho antes do `rmtree`, limpar um sem tocar no outro |
 | `unit/test_navegador_alvo.py` | O clique vai na aba pedida, não na última; snapshot cruzado é recusado |
+| `unit/test_orcamento.py` | Ordem do sacrifício, varredura de tetos contra par quebrado |
+| `unit/test_resultado_policy.py` | Identificador sobrevive à poda, padrão que falha fechado |
 | `integration/test_browser_snapshot_real.py` | As seis conferências contra páginas que mudam de verdade |
 | `integration/test_browser_rede_real.py` | Subrecurso, `fetch` e redirecionamento barrados no Chromium |
 | `unit/test_distribuicao.py` | Allowlist, scanner de segredos, o pacote não perde código |
