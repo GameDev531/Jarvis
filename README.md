@@ -4,7 +4,7 @@ Assistente de voz que roda na sua máquina: escuta uma palavra de ativação,
 entende o comando, responde falando e executa ações no sistema — sempre atrás
 de uma camada de permissão que não confia no julgamento do modelo.
 
-**Estado atual:** Fases 0 a 20 implementadas, mais o grafo de memória e a partida do Ultron. 1056 testes automatizados.
+**Estado atual:** Fases 0 a 20 implementadas, mais o grafo de memória e a partida do Ultron. 1178 testes automatizados.
 O estado detalhado e o desenho do que vem a seguir estão em [PLANO.md](PLANO.md).
 
 ---
@@ -906,6 +906,39 @@ Uma anotação restritiva no schema vence até o `debug_explicit`: `plaintext` �
 uma permissão, e `redact`/`metadata` é uma trava — trava não tem chave de
 depuração.
 
+#### A camada de baixo escreve na trilha também
+
+A política por schema cobre o argumento que passa pelo `ToolRegistry`. Mas o
+armazenamento escreve as próprias linhas, e essas não passam por schema nenhum
+— então por um tempo a trilha se contradizia duas linhas seguidas:
+
+```
+{"event": "fato_add",       "texto": "João tem depressão"}          <- em claro
+{"event": "tool_executada", "args": {"texto": "<redacted:18 chars>"}}
+```
+
+Redigir a segunda não serve de nada enquanto a primeira derrama, e o que
+derramava era o pior: `fato_add` gravava o fato inteiro, `memoria_add` a
+anotação inteira, `ver_tela` a pergunta falada, `relacao_criada` os três nomes
+da ligação — que juntos numa linha são um diagnóstico, mesmo parecendo
+inofensivos separados em argumentos.
+
+Hoje essas linhas passam por `audit_text`: tamanho e digest. O evento continua
+lá — dá para dizer **que** um fato foi guardado, quando, e se é o mesmo
+conteúdo de outra linha. Não dá para dizer qual.
+
+O que **continua** nomeado, por escolha: caminho de arquivo e URL. A trilha
+existe para responder "o que ele mexeu nos meus arquivos" e "o que ele foi
+buscar"; sem o caminho e sem a URL ela não responde nem uma coisa nem outra. O
+acordo é a distinção: **conteúdo que você disse ou guardou vira digest;
+recurso que a ação tocou fica nomeado.** No modo `minimal` nem o caminho vai.
+
+A verificação é por canário, não por leitura de código: um valor improvável é
+empurrado pelos caminhos de verdade e depois procurado na trilha como texto
+cru (`tests/unit/test_trilha_sem_conteudo.py`). Assim ela continua valendo para
+o caminho que alguém escrever amanhã — inclusive um que ninguém lembrou de
+anotar.
+
 ### A suíte que não pode quebrar
 
 ```bash
@@ -1276,7 +1309,7 @@ por voz sai **uma vez**, não a cada turno.
 # o que a CI unitária roda: sem internet, sem Chromium, determinístico
 python -m pytest -m "not network and not browser and not integration and not e2e" -q
 
-python -m pytest tests/ -q          # tudo (1138 testes)
+python -m pytest tests/ -q          # tudo (1178 testes)
 ```
 
 Três suítes, e a diferença entre elas é **de que o teste depende**:
@@ -1351,6 +1384,7 @@ em `tests/integration/`. Marcador com erro de digitação é erro, não silênci
 | `unit/test_fluxo_do_turno.py` | A ordem consolidar-depois-da-chamada, do comando ao relato |
 | `unit/test_privacidade_auditoria.py` | Redação por schema, modos de privacidade, o que nunca sai |
 | `unit/test_auditoria_alcancavel.py` | `audit()` sem import: o NameError que a trilha engolia |
+| `unit/test_trilha_sem_conteudo.py` | Canário pelos caminhos reais: fato, memória, grafo e visão |
 | `unit/test_distribuicao.py` | Allowlist, scanner de segredos, o pacote não perde código |
 | `unit/test_suite_determinista.py` | A suíte unitária não alcança a rede nem o Chromium |
 | `integration/test_navegador_real.py` | Inspetor e travas contra uma página real (`-m browser`) |

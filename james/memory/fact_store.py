@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any
 
 from james.config import normalize_text
-from james.logs import audit, get_logger
+from james.logs import audit, audit_text, get_logger
 
 logger = get_logger("james.memory.facts")
 
@@ -263,7 +263,16 @@ class FactStore:
             rotulos = self._vincular(con, fato_id, entidades or [])
             con.commit()
 
-        audit("fato_add", id=fato_id, texto=conteudo, entidades=rotulos)
+        # O fato em si NÃO vai para a trilha. Ela registra que um fato entrou,
+        # com que tamanho e sob qual digest — o bastante para reconstruir a
+        # sequência de eventos e correlacionar linhas, sem guardar uma segunda
+        # cópia da memória profunda num arquivo de texto que ninguém protege.
+        audit(
+            "fato_add",
+            id=fato_id,
+            **audit_text(conteudo, campo="texto"),
+            entidades_n=len(rotulos),
+        )
         return Fato(
             id=fato_id,
             texto=conteudo,

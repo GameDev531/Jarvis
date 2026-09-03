@@ -38,7 +38,7 @@ descreve por que as coisas são como são e o que falta.
 | 25 — Grafo de memória | ✅ | Arestas tipadas com procedência, travessia em largura, refutação desfaz |
 | 26 — Ferramentas restantes | ⬜ | Ver "O que falta" abaixo |
 
-**1056 testes automatizados.** Piper, whisper.cpp, Qt e câmera continuam sem
+**1178 testes automatizados.** Piper, whisper.cpp, Qt e câmera continuam sem
 execução em hardware real — a Fase 0 existe para isso. O openWakeWord é a
 exceção: o motor foi carregado de verdade neste ambiente (modelo `hey_jarvis`,
 ~14 MB baixados, 2,4% de um núcleo em escuta contínua num processador

@@ -22,7 +22,7 @@ descrição em texto.
 
 from __future__ import annotations
 
-from james.logs import audit, get_logger
+from james.logs import audit, audit_text, get_logger
 from james.tools.registry import Tool, ToolRegistry, ToolResult
 
 logger = get_logger("james.tools.vision")
@@ -91,7 +91,13 @@ def register(registry: ToolRegistry, config, guard) -> None:
             logger.error("Captura de tela falhou: %s", exc)
             return ToolResult.failure("Não consegui capturar a tela.")
 
-        audit("ver_tela", tamanho_kb=len(imagem) // 1024, pergunta=pergunta)
+        # A pergunta descreve o que está na tela sem precisar da imagem:
+        # "o que diz naquele e-mail do banco?" já conta demais.
+        audit(
+            "ver_tela",
+            tamanho_kb=len(imagem) // 1024,
+            **audit_text(pergunta, campo="pergunta"),
+        )
         try:
             descricao = client.describe_image(imagem, "image/png", pergunta)
         except Exception as exc:  # noqa: BLE001 — falha de visão não derruba o turno
@@ -121,7 +127,11 @@ def register(registry: ToolRegistry, config, guard) -> None:
             logger.error("Captura de câmera falhou: %s", exc)
             return ToolResult.failure(str(exc))
 
-        audit("ver_camera", tamanho_kb=len(imagem) // 1024, pergunta=pergunta)
+        audit(
+            "ver_camera",
+            tamanho_kb=len(imagem) // 1024,
+            **audit_text(pergunta, campo="pergunta"),
+        )
         try:
             descricao = client.describe_image(imagem, "image/jpeg", pergunta)
         except Exception as exc:  # noqa: BLE001

@@ -33,7 +33,7 @@ import threading
 from enum import Enum
 from pathlib import Path
 
-from james.logs import audit, get_logger
+from james.logs import audit, audit_text, get_logger
 
 logger = get_logger("james.memory")
 
@@ -152,7 +152,9 @@ class MemoryStore:
                 return "Não consegui gravar na memória."
 
         self._snapshot = None
-        audit("memoria_add", escopo=scope.value, texto=entry)
+        # A anotação é o retrato que o James faz de você; guardá-la de novo
+        # na trilha seria uma segunda cópia, num arquivo mais fácil de ler.
+        audit("memoria_add", escopo=scope.value, **audit_text(entry, campo="texto"))
         return "Guardado."
 
     def replace(self, scope: MemoryScope, fragment: str, new_text: str) -> str:
@@ -182,7 +184,13 @@ class MemoryStore:
                 return "Não consegui gravar na memória."
 
         self._snapshot = None
-        audit("memoria_replace", escopo=scope.value, de=target, para=replacement)
+        # Substituir vaza DUAS vezes se ninguém olhar: o de antes e o de depois.
+        audit(
+            "memoria_replace",
+            escopo=scope.value,
+            **audit_text(target, campo="de"),
+            **audit_text(replacement, campo="para"),
+        )
         return "Atualizado."
 
     def remove(self, scope: MemoryScope, fragment: str) -> str:
@@ -207,7 +215,7 @@ class MemoryStore:
                 return "Não consegui gravar na memória."
 
         self._snapshot = None
-        audit("memoria_remove", escopo=scope.value, texto=target)
+        audit("memoria_remove", escopo=scope.value, **audit_text(target, campo="texto"))
         return "Esquecido."
 
     def search(self, query: str) -> list[tuple[str, str]]:

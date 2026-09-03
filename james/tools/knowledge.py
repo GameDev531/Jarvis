@@ -16,7 +16,7 @@ ironia nem mudança de contexto no tempo.
 
 from __future__ import annotations
 
-from james.logs import audit, get_logger
+from james.logs import audit, audit_text, get_logger
 from james.memory.fact_store import FactStore, FactStoreFull
 from james.skills.installer import SkillInstallError, install_skill
 from james.skills.registry import SkillRegistry
@@ -165,7 +165,14 @@ def register_facts(registry: ToolRegistry, config, guard, facts: FactStore) -> N
 
         criada = facts.relacionar(origem, tipo, destino, fato_id=fato_id)
         if criada:
-            audit("relacao_criada", origem=origem, tipo=tipo, destino=destino)
+            # Separados em três argumentos os nomes parecem inofensivos; juntos
+            # na mesma linha, `("João", "tem", "depressão")` é um diagnóstico.
+            audit(
+                "relacao_criada",
+                **audit_text(origem, campo="origem"),
+                **audit_text(tipo, campo="tipo"),
+                **audit_text(destino, campo="destino"),
+            )
         # Sem `ack`: ligar duas coisas na memória é interno, como guardar.
         return ToolResult(ok=True, data={"criada": criada, "ja_existia": not criada})
 
